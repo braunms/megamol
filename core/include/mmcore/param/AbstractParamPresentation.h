@@ -8,17 +8,16 @@
 #ifndef MEGAMOLCORE_ABSTRACTPARAMPRESENTATION_H_INCLUDED
 #define MEGAMOLCORE_ABSTRACTPARAMPRESENTATION_H_INCLUDED
 
-#include "mmcore/api/MegaMolCore.std.h"
-
-#include "mmcore/utility/log/Log.h"
 
 #include <string>
 #include <map>
 
-#include "json.hpp"
+#include "mmcore/utility/JSONHelper.h"
+#include "mmcore/api/MegaMolCore.std.h"
+#include "mmcore/utility/log/Log.h"
 
 
-#define GUI_JSON_TAG_GUISTATE_PARAMETERS ("Parameters")
+#define GUI_JSON_TAG_GUISTATE_PARAMETERS ("ParameterStates")
 
 
 namespace megamol {
@@ -59,7 +58,9 @@ public:
         TransferFunction = 1 << 5,      // Transfer function editor widget
         Knob = 1 << 6,                  // Knob widget for int and float
         PinValueToMouse = 1 << 7,       // Pin parameter value to mouse position
-        Group_Animation = 1 << 8        // Animation widget group
+        Rotation3D_Direction = 1 << 8,  // Widget for 3D rotation - represented via direction vector (orbital manipulator)
+        Rotation3D_Axes = 1 << 9,       // Widget for 3D rotation - represented via axes (orbital manipulator)
+        Group_Animation = 1 << 10       // Animation widget group
     };
 
     /**
@@ -158,8 +159,8 @@ public:
     static const std::string GetTypeName(AbstractParamPresentation::ParamType type);
 
     /** De-/Serialization of parameters GUi state. */
-    bool ParameterGUIStateFromJSONString(const std::string& in_json_string, const std::string& param_fullname);
-    bool ParameterGUIStateToJSON(nlohmann::json& inout_json, const std::string& param_fullname);
+    bool StateFromJSON(const nlohmann::json& in_json, const std::string& param_fullname);
+    bool StateToJSON(nlohmann::json& inout_json, const std::string& param_fullname);
 
 protected:
 

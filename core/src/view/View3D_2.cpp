@@ -46,6 +46,8 @@
 #include "vislib/sys/sysfunctions.h"
 #include <glm/gtx/string_cast.hpp>
 
+#include "glm/gtc/matrix_transform.hpp"
+
 using namespace megamol::core;
 using namespace megamol::core::view;
 
@@ -81,6 +83,7 @@ View3D_2::View3D_2(void)
     , viewKeyMoveStepSlot("viewKey::MoveStep", "The move step size in world coordinates")
     , viewKeyRunFactorSlot("viewKey::RunFactor", "The factor for step size multiplication when running (shift)")
     , viewKeyAngleStepSlot("viewKey::AngleStep", "The angle rotate step in degrees")
+    , viewKeyFixToWorldUpSlot("viewKey::FixToWorldUp","Fix rotation manipulator to world up vector")
     , mouseSensitivitySlot("viewKey::MouseSensitivity", "used for WASD mode")
     , viewKeyRotPointSlot("viewKey::RotPoint", "The point around which the view will be rotated")
     , enableMouseSelectionSlot("enableMouseSelection", "Enable selecting and picking with the mouse")
@@ -104,8 +107,11 @@ View3D_2::View3D_2(void)
     , cameraResolutionXParam("cam::resgate::x", "")
     , cameraResolutionYParam("cam::resgate::y", "")
     , cameraCenterOffsetParam("cam::centeroffset", "")
-    , cameraHalfApertureRadiansParam("cam::halfapertureradians", "")
+    , cameraHalfApertureDegreesParam("cam::halfaperturedegrees", "")
     , cameraHalfDisparityParam("cam::halfdisparity", "")
+    , cameraOvrUpParam("cam::ovr::up", "")
+    , cameraOvrLookatParam("cam::ovr::lookat", "")
+    , cameraOvrParam("cam::ovr::override", "")
     , valuesFromOutside(false)
     , cameraControlOverrideActive(false) {
 
@@ -175,6 +181,9 @@ View3D_2::View3D_2(void)
 
     this->viewKeyAngleStepSlot.SetParameter(new param::FloatParam(90.0f, 0.1f, 360.0f));
     this->MakeSlotAvailable(&this->viewKeyAngleStepSlot);
+
+    this->viewKeyFixToWorldUpSlot.SetParameter(new param::BoolParam(true));
+    this->MakeSlotAvailable(&this->viewKeyFixToWorldUpSlot);
 
     this->mouseSensitivitySlot.SetParameter(new param::FloatParam(3.0f, 0.001f, 10.0f));
     this->mouseSensitivitySlot.SetUpdateCallback(&View3D_2::mouseSensitivityChanged);
@@ -280,15 +289,25 @@ View3D_2::View3D_2(void)
     this->cameraCenterOffsetParam.SetParameter(centeroffsetparam);
     this->MakeSlotAvailable(&this->cameraCenterOffsetParam);
 
-    auto apertureparam = new param::FloatParam(1.0f, 0.0f);
+    auto apertureparam = new param::FloatParam(35.0f, 0.0f);
     apertureparam->SetGUIVisible(camparamvisibility);
-    this->cameraHalfApertureRadiansParam.SetParameter(apertureparam);
-    this->MakeSlotAvailable(&this->cameraHalfApertureRadiansParam);
+    this->cameraHalfApertureDegreesParam.SetParameter(apertureparam);
+    this->MakeSlotAvailable(&this->cameraHalfApertureDegreesParam);
 
     auto disparityparam = new param::FloatParam(1.0f, 0.0f);
     disparityparam->SetGUIVisible(camparamvisibility);
     this->cameraHalfDisparityParam.SetParameter(disparityparam);
     this->MakeSlotAvailable(&this->cameraHalfDisparityParam);
+
+    this->cameraOvrUpParam << new param::Vector3fParam(vislib::math::Vector<float, 3>());
+    this->MakeSlotAvailable(&this->cameraOvrUpParam);
+
+    this->cameraOvrLookatParam << new param::Vector3fParam(vislib::math::Vector<float, 3>());
+    this->MakeSlotAvailable(&this->cameraOvrLookatParam);
+
+    this->cameraOvrParam << new param::ButtonParam();
+    this->cameraOvrParam.SetUpdateCallback(&View3D_2::cameraOvrCallback);
+    this->MakeSlotAvailable(&this->cameraOvrParam);
 
     this->translateManipulator.set_target(this->cam);
     this->translateManipulator.enable();
@@ -573,9 +592,13 @@ void View3D_2::ResetView(void) {
  * View3D_2::Resize
  */
 void View3D_2::Resize(unsigned int width, unsigned int height) {
-    this->cam.resolution_gate(cam_type::screen_size_type(static_cast<LONG>(width), static_cast<LONG>(height)));
-    this->cam.image_tile(
-        cam_type::screen_rectangle_type(std::array<int, 4>({0, static_cast<int>(height), static_cast<int>(width), 0})));
+    if (this->cam.resolution_gate().width() != width || this->cam.resolution_gate().height() != height) {
+        this->cam.resolution_gate(cam_type::screen_size_type(static_cast<LONG>(width), static_cast<LONG>(height)));
+    }
+    if (this->cam.image_tile().width() != width || this->cam.image_tile().height() != height) {
+        this->cam.image_tile(cam_type::screen_rectangle_type(
+            std::array<int, 4>({0, static_cast<int>(height), static_cast<int>(width), 0})));
+    }
 }
 
 /*
@@ -778,10 +801,6 @@ bool view::View3D_2::OnMouseButton(view::MouseButton button, view::MouseButtonAc
                 {
                     this->turntableManipulator.setActive(
                         wndSize.width() - static_cast<int>(this->mouseX), static_cast<int>(this->mouseY));
-                } else {
-                    this->rotateManipulator.setActive();
-                    this->translateManipulator.setActive(
-                        wndSize.width() - static_cast<int>(this->mouseX), static_cast<int>(this->mouseY));
                 }
             }
 
@@ -792,6 +811,10 @@ bool view::View3D_2::OnMouseButton(view::MouseButton button, view::MouseButtonAc
             if (!anyManipulatorActive) {
                 if ((altPressed ^ this->arcballDefault) || ctrlPressed) {
                     this->orbitAltitudeManipulator.setActive(
+                        wndSize.width() - static_cast<int>(this->mouseX), static_cast<int>(this->mouseY));
+                } else {
+                    this->rotateManipulator.setActive();
+                    this->translateManipulator.setActive(
                         wndSize.width() - static_cast<int>(this->mouseX), static_cast<int>(this->mouseY));
                 }
             }
@@ -906,19 +929,26 @@ bool view::View3D_2::OnMouseScroll(double dx, double dy) {
         if ((*cr)(view::CallRender3D_2::FnOnMouseScroll)) return true;
     }
 
-    // ToDo scrollwheel zooming..
-    if (abs(dy) > 0.0) {
 
-        auto cam_pos = this->cam.eye_position();
-        auto rot_cntr = thecam::math::point<glm::vec4>(glm::vec4(this->rotCenter, 0.0f));
+    // This mouse handling/mapping is so utterly weird and should die!
+    if (!this->toggleMouseSelection && (abs(dy) > 0.0)) {
+        if (this->rotateManipulator.manipulating()) {
+            this->viewKeyMoveStepSlot.Param<param::FloatParam>()->SetValue(
+                this->viewKeyMoveStepSlot.Param<param::FloatParam>()->Value() + 
+                (dy * 0.1f * this->viewKeyMoveStepSlot.Param<param::FloatParam>()->Value())
+            ); 
+        } else {
+            auto cam_pos = this->cam.eye_position();
+            auto rot_cntr = thecam::math::point<glm::vec4>(glm::vec4(this->rotCenter, 0.0f));
 
-        cam_pos.w() = 0.0f;
+            cam_pos.w() = 0.0f;
 
-        auto v = thecam::math::normalise(rot_cntr - cam_pos);
+            auto v = thecam::math::normalise(rot_cntr - cam_pos);
 
-        auto altitude = thecam::math::length(rot_cntr - cam_pos);
+            auto altitude = thecam::math::length(rot_cntr - cam_pos);
 
-        this->cam.position(cam_pos + (v * dy * (altitude / 50.0f)));
+            this->cam.position(cam_pos + (v * dy * (altitude / 50.0f)));
+        }
     }
 
     return true;
@@ -1183,7 +1213,10 @@ void View3D_2::handleCameraMovement(void) {
         mouseDirection /= midpoint;
 
         this->rotateManipulator.pitch(-mouseDirection.y * rotationStep);
-        this->rotateManipulator.yaw(mouseDirection.x * rotationStep);
+        this->rotateManipulator.yaw(
+            mouseDirection.x * rotationStep,
+            this->viewKeyFixToWorldUpSlot.Param<param::BoolParam>()->Value()
+        );
     }
 
     glm::vec3 newCamPos(static_cast<glm::vec4>(this->cam.eye_position()));
@@ -1225,8 +1258,9 @@ void View3D_2::setCameraValues(const view::Camera_2& cam) {
         vislib::math::Vector<float, 2>(cam.centre_offset().x(), cam.centre_offset().y()), makeDirty);
     this->cameraCenterOffsetParam.QueueUpdateNotification();
 
-    this->cameraHalfApertureRadiansParam.Param<param::FloatParam>()->SetValue(cam.half_aperture_angle_radians(), makeDirty);
-    this->cameraHalfApertureRadiansParam.QueueUpdateNotification();
+    this->cameraHalfApertureDegreesParam.Param<param::FloatParam>()->SetValue(
+        cam.half_aperture_angle_radians() * 180.0f / M_PI, makeDirty);
+    this->cameraHalfApertureDegreesParam.QueueUpdateNotification();
 
     this->cameraHalfDisparityParam.Param<param::FloatParam>()->SetValue(cam.half_disparity(), makeDirty);
     this->cameraHalfDisparityParam.QueueUpdateNotification();
@@ -1311,10 +1345,10 @@ bool View3D_2::adaptCameraValues(view::Camera_2& cam) {
         this->cameraCenterOffsetParam.ResetDirty();
         result = true;
     }
-    if (this->cameraHalfApertureRadiansParam.IsDirty()) {
-        auto val = this->cameraHalfApertureRadiansParam.Param<param::FloatParam>()->Value();
-        this->cam.half_aperture_angle_radians(val);
-        this->cameraHalfApertureRadiansParam.ResetDirty();
+    if (this->cameraHalfApertureDegreesParam.IsDirty()) {
+        auto val = this->cameraHalfApertureDegreesParam.Param<param::FloatParam>()->Value();
+        this->cam.half_aperture_angle_radians(val * M_PI / 180.0f);
+        this->cameraHalfApertureDegreesParam.ResetDirty();
         result = true;
     }
     if (this->cameraHalfDisparityParam.IsDirty()) {
@@ -1324,4 +1358,26 @@ bool View3D_2::adaptCameraValues(view::Camera_2& cam) {
         result = true;
     }
     return result;
+}
+
+
+bool View3D_2::cameraOvrCallback(param::ParamSlot& p) {
+    auto up_vis = this->cameraOvrUpParam.Param<param::Vector3fParam>()->Value();
+    auto lookat_vis = this->cameraOvrLookatParam.Param<param::Vector3fParam>()->Value();
+
+    glm::vec3 up(up_vis.X(), up_vis.Y(), up_vis.Z());
+    up = glm::normalize(up);
+    glm::vec3 lookat(lookat_vis.X(), lookat_vis.Y(), lookat_vis.Z());
+
+    glm::mat3 view;
+    view[2] = -glm::normalize(lookat - glm::vec3(static_cast<glm::vec4>(this->cam.eye_position())));
+    view[0] = glm::normalize(glm::cross(up, view[2]));
+    view[1] = glm::normalize(glm::cross(view[2], view[0]));
+
+    auto orientation = glm::quat_cast(view);
+
+    this->cam.orientation(orientation);
+    this->rotCenter = lookat;
+
+    return true;
 }

@@ -14,10 +14,10 @@ using namespace megamol::gui;
 
 
 GUIView::GUIView()
-    : core::view::AbstractView()
-    , overrideCall(nullptr)
-    , render_view_slot("renderview", "Connects to a preceding RenderView that will be decorated with a GUI")
-    , gui() {
+        : core::view::AbstractView()
+        , overrideCall(nullptr)
+        , render_view_slot("renderview", "Connects to a preceding RenderView that will be decorated with a GUI")
+        , gui() {
 
     this->render_view_slot.SetCompatibleCall<core::view::CallRenderViewDescription>();
     this->MakeSlotAvailable(&this->render_view_slot);
@@ -27,9 +27,23 @@ GUIView::GUIView()
     }
 }
 
-GUIView::~GUIView() { this->Release(); }
 
-bool GUIView::create() { return gui.CreateContext_GL(this->GetCoreInstance()); }
+GUIView::~GUIView() {
+    this->Release();
+}
+
+
+bool GUIView::create() {
+
+    if (this->GetCoreInstance()->IsmmconsoleFrontendCompatible()) {
+        return gui.CreateContext_GL(this->GetCoreInstance());
+    } else {
+        megamol::core::utility::log::Log::DefaultLog.WriteError(
+            "[GUI] GUIView module can only be used with mmconsole frontend. [%s, %s, line %d]\n", __FILE__,
+            __FUNCTION__, __LINE__);
+        return false;
+    }
+}
 
 
 void GUIView::release() {}
@@ -60,20 +74,20 @@ float GUIView::DefaultTime(double instTime) const {
 
 unsigned int GUIView::GetCameraSyncNumber(void) const {
     megamol::core::utility::log::Log::DefaultLog.WriteWarn(
-        "Unsupported. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
+        "[GUI] Unsupported. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
     return 0u;
 }
 
 
 void GUIView::SerialiseCamera(vislib::Serialiser& serialiser) const {
     megamol::core::utility::log::Log::DefaultLog.WriteWarn(
-        "Unsupported. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
+        "[GUI] Unsupported. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
 }
 
 
 void GUIView::DeserialiseCamera(vislib::Serialiser& serialiser) {
     megamol::core::utility::log::Log::DefaultLog.WriteWarn(
-        "Unsupported. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
+        "[GUI] Unsupported. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
 }
 
 
@@ -85,31 +99,36 @@ void GUIView::Render(const mmcRenderViewContext& context) {
     if (crv) {
         crv->SetOutputBuffer(GL_BACK);
         crv->SetInstanceTime(context.InstanceTime);
-        crv->SetTime(
-            -1.0f); // Should be negative to trigger animation! (see View3D.cpp line ~660 | View2D.cpp line ~350)
-        auto viewport = crv->GetViewport();
-        this->gui.PreDraw(glm::vec2(static_cast<float>(viewport.Width()), static_cast<float>(viewport.Height())),
-            crv->InstanceTime());
+        // Should be negative to trigger animation! (see View3D_2.cpp line ~612 | View2D.cpp line ~661):
+        crv->SetTime(-1.0f);
+        auto viewport_rect = crv->GetViewport();
+        auto viewport =
+            glm::vec2(static_cast<float>(viewport_rect.Width()), static_cast<float>(viewport_rect.Height()));
+        this->gui.PreDraw(viewport, viewport, crv->InstanceTime());
         (*crv)(core::view::AbstractCallRender::FnRender);
         this->gui.PostDraw();
     } else {
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         if (this->overrideCall != nullptr) {
-            auto viewport = this->overrideCall->GetViewport();
-            this->gui.PreDraw(glm::vec2(static_cast<float>(viewport.Width()), static_cast<float>(viewport.Height())),
-                context.InstanceTime);
+            auto viewport_rect = this->overrideCall->GetViewport();
+            auto viewport =
+                glm::vec2(static_cast<float>(viewport_rect.Width()), static_cast<float>(viewport_rect.Height()));
+            this->gui.PreDraw(viewport, viewport, context.InstanceTime);
             this->gui.PostDraw();
         } else {
             GLint vp[4];
             glGetIntegerv(GL_VIEWPORT, vp);
-            this->gui.PreDraw(glm::vec2(static_cast<float>(vp[2]), static_cast<float>(vp[3])), context.InstanceTime);
+            auto viewport = glm::vec2(static_cast<float>(vp[2]), static_cast<float>(vp[3]));
+            this->gui.PreDraw(viewport, viewport, context.InstanceTime);
             this->gui.PostDraw();
         }
     }
     if (this->doHookCode()) {
         this->doAfterRenderHook();
     }
+
+    this->gui.SynchronizeGraphs();
 }
 
 
@@ -149,7 +168,8 @@ bool GUIView::OnKey(core::view::Key key, core::view::KeyAction action, core::vie
 
     if (!input_consumed) {
         auto* crv = this->render_view_slot.CallAs<core::view::CallRenderView>();
-        if (crv == nullptr) return false;
+        if (crv == nullptr)
+            return false;
 
         core::view::InputEvent evt;
         evt.tag = core::view::InputEvent::Tag::Key;
@@ -187,7 +207,8 @@ bool GUIView::OnMouseMove(double x, double y) {
 
     if (!input_consumed) {
         auto* crv = this->render_view_slot.CallAs<core::view::CallRenderView>();
-        if (crv == nullptr) return false;
+        if (crv == nullptr)
+            return false;
 
         core::view::InputEvent evt;
         evt.tag = core::view::InputEvent::Tag::MouseMove;
@@ -208,7 +229,8 @@ bool GUIView::OnMouseButton(
 
     if (!input_consumed) {
         auto* crv = this->render_view_slot.CallAs<core::view::CallRenderView>();
-        if (crv == nullptr) return false;
+        if (crv == nullptr)
+            return false;
 
         core::view::InputEvent evt;
         evt.tag = core::view::InputEvent::Tag::MouseButton;
@@ -229,7 +251,8 @@ bool GUIView::OnMouseScroll(double dx, double dy) {
 
     if (!input_consumed) {
         auto* crv = this->render_view_slot.CallAs<core::view::CallRenderView>();
-        if (crv == nullptr) return false;
+        if (crv == nullptr)
+            return false;
 
         core::view::InputEvent evt;
         evt.tag = core::view::InputEvent::Tag::MouseScroll;
@@ -245,7 +268,8 @@ bool GUIView::OnMouseScroll(double dx, double dy) {
 
 bool GUIView::OnRenderView(megamol::core::Call& call) {
     megamol::core::view::CallRenderView* crv = dynamic_cast<megamol::core::view::CallRenderView*>(&call);
-    if (crv == nullptr) return false;
+    if (crv == nullptr)
+        return false;
 
     this->overrideCall = crv;
 
@@ -253,7 +277,8 @@ bool GUIView::OnRenderView(megamol::core::Call& call) {
     ::ZeroMemory(&context, sizeof(context));
     context.Time = crv->Time();
     context.InstanceTime = crv->InstanceTime();
-    // XXX: Affinity
+    // XXX Affinity?
+
     this->Render(context);
 
     this->overrideCall = nullptr;

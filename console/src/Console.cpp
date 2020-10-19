@@ -35,6 +35,8 @@
 #include "vislib/sys/sysfunctions.h"
 #include "vislib/Trace.h"
 
+#include "mmcore/utility/log/StreamTarget.h"
+
 /** The core instance handle. */
 static megamol::console::CoreHandle hCore;
 
@@ -194,7 +196,7 @@ void initTraceAndLog() {
     megamol::core::utility::log::Log::DefaultLog.SetLogFileName(static_cast<const char*>(NULL), false);
     megamol::core::utility::log::Log::DefaultLog.SetLevel(megamol::core::utility::log::Log::LEVEL_ALL);
     megamol::core::utility::log::Log::DefaultLog.SetEchoLevel(megamol::core::utility::log::Log::LEVEL_ALL);
-    megamol::core::utility::log::Log::DefaultLog.SetEchoTarget(std::make_shared<megamol::core::utility::log::Log::StreamTarget>(std::cout, megamol::core::utility::log::Log::LEVEL_ALL));
+    megamol::core::utility::log::Log::DefaultLog.SetEchoTarget(std::make_shared<megamol::core::utility::log::StreamTarget>(std::cout, megamol::core::utility::log::Log::LEVEL_ALL));
     megamol::console::utility::AboutInfo::LogGreeting();
     megamol::console::utility::AboutInfo::LogVersionInfo();
     megamol::console::utility::AboutInfo::LogStartTime();
@@ -616,7 +618,8 @@ void signalCtrlC(int) {
  * @param message The text of the log message.
  */
 void MEGAMOLCORE_CALLBACK writeLogEchoToConsole(unsigned int level, const char* message) {
-    std::cout << std::setw(4) << level << "|" << message;
+    auto closing = (message[std::strlen(message)-1] == '\n') ? "" : "\n";
+    std::cout << std::setw(4) << level << "|" << message << closing;
 }
 
 }

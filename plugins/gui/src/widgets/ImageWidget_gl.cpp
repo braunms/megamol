@@ -18,7 +18,8 @@ ImageWidget::ImageWidget(void) : tex_ptr(nullptr), tooltip() {}
 
 bool megamol::gui::ImageWidget::LoadTextureFromFile(const std::string& filename) {
 
-    if (filename.empty()) return false;
+    if (filename.empty())
+        return false;
     bool retval = false;
 
     static vislib::graphics::BitmapImage img;
@@ -34,8 +35,9 @@ bool megamol::gui::ImageWidget::LoadTextureFromFile(const std::string& filename)
             img.Convert(vislib::graphics::BitmapImage::TemplateFloatRGBA);
             retval = megamol::gui::ImageWidget::LoadTextureFromData(img.Width(), img.Height(), img.PeekDataAs<FLOAT>());
         } else {
-            megamol::core::utility::log::Log::DefaultLog.WriteMsg(megamol::core::utility::log::Log::LEVEL_ERROR,
-                "Unable to read texture: %s [%s, %s, line %d]\n", filename.c_str(), __FILE__, __FUNCTION__, __LINE__);
+            megamol::core::utility::log::Log::DefaultLog.WriteError(
+                "[GUI] Unable to read texture: %s [%s, %s, line %d]\n", filename.c_str(), __FILE__, __FUNCTION__,
+                __LINE__);
             retval = false;
         }
     } else {
@@ -49,17 +51,23 @@ bool megamol::gui::ImageWidget::LoadTextureFromFile(const std::string& filename)
 
 bool megamol::gui::ImageWidget::LoadTextureFromData(int width, int height, float* data) {
 
-    if (data == nullptr) return false;
-
-    glowl::TextureLayout tex_layout(GL_RGBA32F, width, height, 1, GL_RGBA, GL_FLOAT, 1);
-    if (this->tex_ptr == nullptr) {
-        this->tex_ptr =
-            std::make_shared<glowl::Texture2D>("image_widget", tex_layout, static_cast<GLvoid*>(data), false);
-    } else {
-        // Reload data
-        this->tex_ptr->reload(tex_layout, static_cast<GLvoid*>(data), false);
+    if (data == nullptr)
+        return false;
+    try {
+        glowl::TextureLayout tex_layout(GL_RGBA32F, width, height, 1, GL_RGBA, GL_FLOAT, 1);
+        if (this->tex_ptr == nullptr) {
+            this->tex_ptr =
+                std::make_shared<glowl::Texture2D>("image_widget", tex_layout, static_cast<GLvoid*>(data), false);
+        } else {
+            // Reload data
+            this->tex_ptr->reload(tex_layout, static_cast<GLvoid*>(data), false);
+        }
+    } catch (glowl::TextureException e) {
+        megamol::core::utility::log::Log::DefaultLog.WriteError(
+            "[GUI] Error during texture creation: '%s'. [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__,
+            __LINE__);
+        return false;
     }
-
     return true;
 }
 
@@ -71,7 +79,7 @@ void megamol::gui::ImageWidget::Widget(ImVec2 size, ImVec2 uv0, ImVec2 uv1) {
 
     if (!this->IsLoaded()) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
-            "No texture loaded. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
+            "[GUI] No texture loaded. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
         return;
     }
 
@@ -87,7 +95,7 @@ bool megamol::gui::ImageWidget::Button(const std::string& tooltip, ImVec2 size) 
 
     if (!this->IsLoaded()) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
-            "No texture loaded. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
+            "[GUI] No texture loaded. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
         return false;
     }
 

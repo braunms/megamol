@@ -339,6 +339,8 @@ protected:
     /** The angle rotate step in degrees */
     param::ParamSlot viewKeyAngleStepSlot;
 
+    param::ParamSlot viewKeyFixToWorldUpSlot;
+
     /** sensitivity for mouse rotation in WASD mode */
     param::ParamSlot mouseSensitivitySlot;
 
@@ -369,8 +371,15 @@ protected:
     param::ParamSlot cameraResolutionXParam;
     param::ParamSlot cameraResolutionYParam;
     param::ParamSlot cameraCenterOffsetParam;
-    param::ParamSlot cameraHalfApertureRadiansParam;
+    param::ParamSlot cameraHalfApertureDegreesParam;
     param::ParamSlot cameraHalfDisparityParam;
+
+    /** Camara override parameters */
+    param::ParamSlot cameraOvrUpParam;
+    param::ParamSlot cameraOvrLookatParam;
+    param::ParamSlot cameraOvrParam;
+
+    bool cameraOvrCallback(param::ParamSlot& p);
 
     /** The mouse x coordinate */
     float mouseX;
