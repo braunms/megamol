@@ -45,7 +45,7 @@ ImGuiID megamol::gui::Graph::AddEmptyModule(void) {
 #endif // GUI_VERBOSE
 
         return mod_uid;
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return GUI_INVALID_ID;
@@ -73,7 +73,7 @@ ImGuiID megamol::gui::Graph::AddModule(const ModuleStockVector_t& stock_modules,
                 mod_ptr->plugin_name = mod.plugin_name;
                 mod_ptr->is_view = mod.is_view;
                 mod_ptr->name = this->generate_unique_module_name(mod.class_name);
-                mod_ptr->main_view_name.clear();
+                mod_ptr->graph_entry_name.clear();
                 mod_ptr->present.label_visible = this->present.GetModuleLabelVisibility();
 
                 for (auto& p : mod.parameters) {
@@ -122,7 +122,7 @@ ImGuiID megamol::gui::Graph::AddModule(const ModuleStockVector_t& stock_modules,
                 return mod_uid;
             }
         }
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return GUI_INVALID_ID;
@@ -145,10 +145,10 @@ bool megamol::gui::Graph::DeleteModule(ImGuiID module_uid, bool force) {
         for (auto iter = this->modules.begin(); iter != this->modules.end(); iter++) {
             if ((*iter)->uid == module_uid) {
 
-                if (!force && (*iter)->IsMainView()) {
+                if (!force && (*iter)->IsGraphEntry()) {
                     if (this->GetCoreInterface() == GraphCoreInterface::CORE_INSTANCE_GRAPH) {
                         megamol::core::utility::log::Log::DefaultLog.WriteWarn(
-                            "[GUI] The action [Delete main view/ view instance] is not yet supported for the graph "
+                            "[GUI] The action [Delete graph entry/ view instance] is not yet supported for the graph "
                             "using the 'Core Instance Graph' interface. Open project from file to make desired "
                             "changes. [%s, %s, line %d]\n",
                             __FILE__, __FUNCTION__, __LINE__);
@@ -157,33 +157,33 @@ bool megamol::gui::Graph::DeleteModule(ImGuiID module_uid, bool force) {
                 }
 
                 this->present.ResetStatePointers();
+                QueueData queue_data;
 
                 // 1) Reset module and call slot pointers in groups
                 auto current_full_name = (*iter)->FullName();
                 GroupPtr_t module_group_ptr = nullptr;
-                ImGuiID delete_empty_group = GUI_INVALID_ID;
                 for (auto& group_ptr : this->groups) {
                     if (group_ptr->ContainsModule(module_uid)) {
                         group_ptr->RemoveModule(module_uid);
                         module_group_ptr = group_ptr;
-                    }
-                    if (group_ptr->Empty()) {
-                        delete_empty_group = group_ptr->uid;
+
+                        queue_data.name_id = current_full_name;
+                        queue_data.rename_id = (*iter)->FullName();
+                        this->PushSyncQueue(QueueAction::RENAME_MODULE, queue_data);
                     }
                 }
-                QueueData queue_data;
-                queue_data.name_id = current_full_name;
-                queue_data.rename_id = (*iter)->FullName();
-                this->PushSyncQueue(QueueAction::RENAME_MODULE, queue_data);
 
                 // 2)  Delete calls
                 for (auto& callslot_map : (*iter)->GetCallSlots()) {
                     for (auto& callslot_ptr : callslot_map.second) {
+                        std::vector<ImGuiID> delete_call_uids;
                         for (auto& call_ptr : callslot_ptr->GetConnectedCalls()) {
                             if (call_ptr != nullptr) {
-                                auto call_uid = call_ptr->uid;
-                                this->DeleteCall(call_uid);
+                                delete_call_uids.push_back(call_ptr->uid);
                             }
+                        }
+                        for (auto& call_uid : delete_call_uids) {
+                            this->DeleteCall(call_uid);
                         }
                     }
                 }
@@ -198,7 +198,7 @@ bool megamol::gui::Graph::DeleteModule(ImGuiID module_uid, bool force) {
 
 #ifdef GUI_VERBOSE
                 megamol::core::utility::log::Log::DefaultLog.WriteInfo(
-                    "[GUI] Deleted module '%s' (uid %i) from  project '%s'.\n", (*iter)->class_name.c_str(),
+                    "[GUI] Deleted module '%s' (uid %i) from  project '%s'.\n", (*iter)->FullName().c_str(),
                     (*iter)->uid, this->name.c_str());
 #endif // GUI_VERBOSE
 
@@ -214,18 +214,12 @@ bool megamol::gui::Graph::DeleteModule(ImGuiID module_uid, bool force) {
                 (*iter).reset();
                 this->modules.erase(iter);
 
-                // 6) Delete empty groups
-                module_group_ptr.reset();
-                if (delete_empty_group != GUI_INVALID_ID) {
-                    this->DeleteGroup(delete_empty_group);
-                }
-
                 this->ForceSetDirty();
                 return true;
             }
         }
 
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return false;
@@ -357,7 +351,7 @@ bool megamol::gui::Graph::AddCall(const CallStockVector_t& stock_calls, ImGuiID 
                 }
             }
         }
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return false;
@@ -400,7 +394,7 @@ bool megamol::gui::Graph::AddCall(
 
         return this->AddCall(call_ptr, callslot_1, callslot_2);
 
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return false;
@@ -577,36 +571,38 @@ bool megamol::gui::Graph::DeleteCall(ImGuiID call_uid) {
                 if ((*iter)->uid == delete_call_uid) {
 
                     QueueData queue_data;
-                    bool valid_ptr = false;
+                    bool valid_caller_ptr = false;
                     auto caller_ptr = (*iter)->GetCallSlot(megamol::gui::CallSlotType::CALLER);
                     if (caller_ptr != nullptr) {
                         if (caller_ptr->GetParentModule() != nullptr) {
                             queue_data.caller = caller_ptr->GetParentModule()->FullName() + "::" + caller_ptr->name;
-                            valid_ptr = true;
+                            valid_caller_ptr = true;
                         }
                     }
-#ifdef GUI_VERBOSE
-                    if (!valid_ptr) {
+                    if (!valid_caller_ptr) {
                         megamol::core::utility::log::Log::DefaultLog.WriteError(
                             "[GUI] Pointer to caller slot is nullptr. [%s, %s, line %d]\n", __FILE__, __FUNCTION__,
                             __LINE__);
                     }
-#endif // GUI_VERBOSE
-                    valid_ptr = false;
+
+                    bool valid_callee_ptr = false;
                     auto callee_ptr = (*iter)->GetCallSlot(megamol::gui::CallSlotType::CALLEE);
                     if (callee_ptr != nullptr) {
                         if (callee_ptr->GetParentModule() != nullptr) {
                             queue_data.callee = callee_ptr->GetParentModule()->FullName() + "::" + callee_ptr->name;
-                            valid_ptr = true;
+                            valid_callee_ptr = true;
                         }
                     }
-#ifdef GUI_VERBOSE
-                    if (!valid_ptr) {
+                    if (!valid_callee_ptr) {
                         megamol::core::utility::log::Log::DefaultLog.WriteError(
                             "[GUI] Pointer to callee slot is nullptr. [%s, %s, line %d]\n", __FILE__, __FUNCTION__,
                             __LINE__);
                     }
-#endif // GUI_VERBOSE
+
+                    if (!valid_caller_ptr || !valid_callee_ptr) {
+                        return false;
+                    }
+
                     this->PushSyncQueue(QueueAction::DELETE_CALL, queue_data);
 
                     this->present.ResetStatePointers();
@@ -632,7 +628,7 @@ bool megamol::gui::Graph::DeleteCall(ImGuiID call_uid) {
                 }
             }
         }
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return false;
@@ -660,7 +656,7 @@ ImGuiID megamol::gui::Graph::AddGroup(const std::string& group_name) {
 #endif // GUI_VERBOSE
         return group_id;
 
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return GUI_INVALID_ID;
@@ -716,7 +712,7 @@ bool megamol::gui::Graph::DeleteGroup(ImGuiID group_uid) {
                 return true;
             }
         }
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return false;
@@ -762,7 +758,7 @@ ImGuiID megamol::gui::Graph::AddGroupModule(const std::string& group_name, const
                 }
             }
         }
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return GUI_INVALID_ID;
@@ -906,9 +902,9 @@ bool megamol::gui::Graph::PushSyncQueue(QueueAction action, const QueueData& in_
             return false;
         }
     } break;
-    case (QueueAction::CREATE_MAIN_VIEW): {
+    case (QueueAction::CREATE_GRAPH_ENTRY): {
     } break;
-    case (QueueAction::REMOVE_MAIN_VIEW): {
+    case (QueueAction::REMOVE_GRAPH_ENTRY): {
     } break;
     default: {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
@@ -972,31 +968,37 @@ bool megamol::gui::Graph::StateFromJSON(const nlohmann::json& in_json) {
                             graph_state, {"show_grid"}, &this->present.show_grid);
 
                         if (megamol::core::utility::get_json_value<bool>(
-                                graph_state, {"show_call_names"}, &this->present.show_call_names)) {
+                                graph_state, {"show_call_label"}, &this->present.show_call_label)) {
                             for (auto& call : this->GetCalls()) {
-                                call->present.label_visible = this->present.show_call_names;
+                                call->present.label_visible = this->present.show_call_label;
                             }
                         }
                         if (megamol::core::utility::get_json_value<bool>(
-                                graph_state, {"show_module_names"}, &this->present.show_module_names)) {
+                                graph_state, {"show_call_slots_label"}, &this->present.show_call_slots_label)) {
+                            for (auto& call : this->GetCalls()) {
+                                call->present.slots_visible = this->present.show_call_slots_label;
+                            }
+                        }
+                        if (megamol::core::utility::get_json_value<bool>(
+                                graph_state, {"show_module_label"}, &this->present.show_module_label)) {
                             for (auto& mod : this->GetModules()) {
-                                mod->present.label_visible = this->present.show_module_names;
+                                mod->present.label_visible = this->present.show_module_label;
                             }
                         }
 
                         if (megamol::core::utility::get_json_value<bool>(
-                                graph_state, {"show_slot_names"}, &this->present.show_slot_names)) {
+                                graph_state, {"show_slot_label"}, &this->present.show_slot_label)) {
                             for (auto& mod : this->GetModules()) {
                                 for (auto& callslot_types : mod->GetCallSlots()) {
                                     for (auto& callslots : callslot_types.second) {
-                                        callslots->present.label_visible = this->present.show_slot_names;
+                                        callslots->present.label_visible = this->present.show_slot_label;
                                     }
                                 }
                             }
                             for (auto& group_ptr : this->GetGroups()) {
                                 for (auto& interfaceslots_map : group_ptr->GetInterfaceSlots()) {
                                     for (auto& interfaceslot_ptr : interfaceslots_map.second) {
-                                        interfaceslot_ptr->present.label_visible = this->present.show_slot_names;
+                                        interfaceslot_ptr->present.label_visible = this->present.show_slot_label;
                                     }
                                 }
                             }
@@ -1047,10 +1049,9 @@ bool megamol::gui::Graph::StateFromJSON(const nlohmann::json& in_json) {
                                         }
                                     }
                                     if (!module_found) {
-                                        megamol::core::utility::log::Log::DefaultLog.WriteError(
+                                        megamol::core::utility::log::Log::DefaultLog.WriteWarn(
                                             "[GUI] JSON state: Unable to find module '%s' to apply graph position "
-                                            "in "
-                                            "configurator. [%s, %s, line %d]\n",
+                                            "in configurator. [%s, %s, line %d]\n",
                                             module_fullname.c_str(), __FILE__, __FUNCTION__, __LINE__);
                                     }
                                 }
@@ -1126,7 +1127,7 @@ bool megamol::gui::Graph::StateFromJSON(const nlohmann::json& in_json) {
                                                 }
                                             }
                                             if (!group_found) {
-                                                megamol::core::utility::log::Log::DefaultLog.WriteError(
+                                                megamol::core::utility::log::Log::DefaultLog.WriteWarn(
                                                     "[GUI] JSON state: Unable to find group '%s' to add interface "
                                                     "slot. "
                                                     "[%s, %s, line %d]\n",
@@ -1172,9 +1173,11 @@ bool megamol::gui::Graph::StateToJSON(nlohmann::json& inout_json) {
         inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["parameter_sidebar_width"] =
             this->present.parameter_sidebar_width;
         inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["show_grid"] = this->present.show_grid;
-        inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["show_call_names"] = this->present.show_call_names;
-        inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["show_slot_names"] = this->present.show_slot_names;
-        inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["show_module_names"] = this->present.show_module_names;
+        inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["show_call_label"] = this->present.show_call_label;
+        inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["show_call_slots_label"] =
+            this->present.show_call_slots_label;
+        inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["show_slot_label"] = this->present.show_slot_label;
+        inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["show_module_label"] = this->present.show_module_label;
         inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["params_visible"] = this->present.params_visible;
         inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["params_readonly"] = this->present.params_readonly;
         inout_json[GUI_JSON_TAG_GRAPHS][GUI_JSON_TAG_PROJECT]["param_extended_mode"] =
@@ -1259,13 +1262,13 @@ const std::string megamol::gui::Graph::generate_unique_module_name(const std::st
 }
 
 
-const std::string megamol::gui::Graph::GenerateUniqueMainViewName(void) {
+const std::string megamol::gui::Graph::GenerateUniqueGraphEntryName(void) {
 
     int new_name_id = 0;
-    std::string new_name_prefix("MainView_");
+    std::string new_name_prefix("GraphEntry_");
     for (auto& module_ptr : this->modules) {
-        if (module_ptr->main_view_name.find(new_name_prefix) == 0) {
-            std::string int_postfix = module_ptr->main_view_name.substr(new_name_prefix.length());
+        if (module_ptr->graph_entry_name.find(new_name_prefix) == 0) {
+            std::string int_postfix = module_ptr->graph_entry_name.substr(new_name_prefix.length());
             try {
                 int last_id = std::stoi(int_postfix);
                 new_name_id = std::max(new_name_id, last_id);

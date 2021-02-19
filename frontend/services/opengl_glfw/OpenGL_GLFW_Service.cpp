@@ -36,13 +36,30 @@
 #include <iostream>
 
 static void log(std::string const& text) {
-    const std::string msg = "OpenGL_GLFW_Service: " + text; 
+    const std::string msg = "OpenGL_GLFW_Service: " + text;
     megamol::core::utility::log::Log::DefaultLog.WriteInfo(msg.c_str());
 }
 
 static void log_error(std::string const& text) {
-    const std::string msg = "OpenGL_GLFW_Service: " + text; 
+    const std::string msg = "OpenGL_GLFW_Service: " + text;
     megamol::core::utility::log::Log::DefaultLog.WriteError(msg.c_str());
+}
+
+// See: https://github.com/glfw/glfw/issues/1630
+static int fixGlfwKeyboardMods(int mods, int key, int action) {
+    if (key == GLFW_KEY_LEFT_SHIFT || key == GLFW_KEY_RIGHT_SHIFT) {
+        return (action == GLFW_RELEASE) ? mods & (~GLFW_MOD_SHIFT) : mods | GLFW_MOD_SHIFT;
+    }
+    if (key == GLFW_KEY_LEFT_CONTROL || key == GLFW_KEY_RIGHT_CONTROL) {
+        return (action == GLFW_RELEASE) ? mods & (~GLFW_MOD_CONTROL) : mods | GLFW_MOD_CONTROL;
+    }
+    if (key == GLFW_KEY_LEFT_ALT || key == GLFW_KEY_RIGHT_ALT) {
+        return (action == GLFW_RELEASE) ? mods & (~GLFW_MOD_ALT) : mods | GLFW_MOD_ALT;
+    }
+    if (key == GLFW_KEY_LEFT_SUPER || key == GLFW_KEY_RIGHT_SUPER) {
+        return (action == GLFW_RELEASE) ? mods & (~GLFW_MOD_SUPER) : mods | GLFW_MOD_SUPER;
+    }
+    return mods;
 }
 
 static std::string get_message_id_name(GLuint id) {
@@ -203,6 +220,60 @@ static void APIENTRY opengl_debug_message_callback(GLenum source, GLenum type, G
     }
 }
 
+void megamol::frontend_resources::WindowManipulation::set_window_title(const char* title) const {
+    glfwSetWindowTitle(reinterpret_cast<GLFWwindow*>(window_ptr), title);
+}
+
+void megamol::frontend_resources::WindowManipulation::set_framebuffer_size(const unsigned int width, const unsigned int height) const {
+    auto window = reinterpret_cast<GLFWwindow*>(this->window_ptr);
+
+    int fbo_width = 0, fbo_height = 0;
+    int window_width = 0, window_height = 0;
+
+    glfwSetWindowSizeLimits(window, GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE);
+    glfwSetWindowSize(window, width, height);
+    glfwGetFramebufferSize(window, &fbo_width, &fbo_height);
+    glfwGetWindowSize(window, &window_width, &window_height);
+
+    if (fbo_width != width || fbo_height != height) {
+        log("WindowManipulation::set_framebuffer_size(): forcing window size limits to " + std::to_string(width) + "x" + std::to_string(height) + ". You wont be able to resize the window manually after this.");
+        glfwSetWindowSizeLimits(window, width, height, width, height);
+        glfwSetWindowSize(window, width, height);
+        glfwGetFramebufferSize(window, &fbo_width, &fbo_height);
+        glfwGetWindowSize(window, &window_width, &window_height);
+    }
+
+    if(fbo_width != width || fbo_height != height) {
+        log_error("WindowManipulation::set_framebuffer_size() could not enforce window size to achieve requested framebuffer size of w: "
+            + std::to_string(width) + ", h: " + std::to_string(height)
+            + ".\n Framebuffer has size w: " + std::to_string(fbo_width) + ", h: " + std::to_string(fbo_height)
+            + "\n Requesting shutdown.");
+        glfwSetWindowShouldClose(window, GLFW_TRUE);
+        static_cast<megamol::frontend::OpenGL_GLFW_Service*>(glfwGetWindowUserPointer(window))->setShutdown();
+    }
+}
+
+void megamol::frontend_resources::WindowManipulation::set_window_position(const unsigned int width, const unsigned int height) const {
+    glfwSetWindowPos(reinterpret_cast<GLFWwindow*>(window_ptr), width, height);
+}
+
+void megamol::frontend_resources::WindowManipulation::set_swap_interval(const unsigned int wait_frames) const {
+    glfwSwapInterval(wait_frames);
+}
+
+void megamol::frontend_resources::WindowManipulation::set_fullscreen(const Fullscreen action) const {
+    switch (action) {
+        case Fullscreen::Maximize:
+            glfwMaximizeWindow(reinterpret_cast<GLFWwindow*>(window_ptr));
+            break;
+        case Fullscreen::Restore:
+            glfwRestoreWindow(reinterpret_cast<GLFWwindow*>(window_ptr));
+            break;
+        default:
+            break;
+    }
+}
+
 namespace megamol {
 namespace frontend {
 
@@ -223,6 +294,7 @@ struct OpenGL_GLFW_Service::PimplData {
     GLFWwindow* glfwContextWindowPtr{nullptr};
     OpenGL_GLFW_Service::Config config;    // keep copy of user-provided config
     std::string fullWindowTitle;
+    std::chrono::system_clock::time_point topmost_before_time;
 };
 
 OpenGL_GLFW_Service::~OpenGL_GLFW_Service() {
@@ -289,6 +361,10 @@ bool OpenGL_GLFW_Service::init(const Config& config) {
         }
     }
 
+    if(m_pimpl->config.windowPlacement.topMost){
+        ::glfwWindowHint(GLFW_FLOATING, GL_TRUE); // floating above other windows / top most
+    }
+
     // options for fullscreen mode
     if (m_pimpl->config.windowPlacement.fullScreen) {
         if (m_pimpl->config.windowPlacement.pos)
@@ -331,10 +407,11 @@ bool OpenGL_GLFW_Service::init(const Config& config) {
     m_opengl_context_impl.ptr = window_ptr;
 
     if (!window_ptr) {
-        log_error("Failed to create GLFW window. Maybe OpenGL is not vailable in your current setup. Ask the person responsible.");
+        log_error("Could not create GLFW Window. You probably do not have OpenGL support. Your graphics hardware might "
+                "be very old, your drivers could be outdated or you are running in a remote desktop session.");
         return false;
     }
-    log(("Create window with size w: " + std::to_string(initial_width) + " h: " + std::to_string(initial_height)).c_str());
+    log("Create window with size w: " + std::to_string(initial_width) + " h: " + std::to_string(initial_height));
 
 
     // we publish a fake GL context to have a resource others can ask for
@@ -373,11 +450,9 @@ bool OpenGL_GLFW_Service::init(const Config& config) {
         log("Enabled OpenGL debug context. Will print debug messages.");
     }
 
-    // TODO: when do we need this?
-    // if (config.windowPlacement.fullScreen ||
-    //     config.windowPlacement.noDec) {
-    //     ::glfwSetInputMode(window_ptr, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    // }
+    if (config.windowPlacement.noCursor) {
+        ::glfwSetInputMode(window_ptr, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+    }
 
     // note the m_data window position got overwritten with monitor position for fullscreen mode
     if (m_pimpl->config.windowPlacement.pos || m_pimpl->config.windowPlacement.fullScreen)
@@ -386,8 +461,8 @@ bool OpenGL_GLFW_Service::init(const Config& config) {
 
     register_glfw_callbacks();
 
-    if (m_pimpl->config.enableVsync)
-        ::glfwSwapInterval(0);
+    int vsync = (m_pimpl->config.enableVsync) ? 1 : 0;
+    ::glfwSwapInterval(vsync);
 
     ::glfwShowWindow(window_ptr);
     //::glfwMakeContextCurrent(nullptr);
@@ -401,17 +476,36 @@ bool OpenGL_GLFW_Service::init(const Config& config) {
     };
     m_windowEvents.previous_state.time = glfwGetTime();
 
+    m_windowManipulation.window_ptr = window_ptr;
+
     // make the events and resources managed/provided by this service available to the outside world
     m_renderResourceReferences = {
         {"KeyboardEvents", m_keyboardEvents},
         {"MouseEvents", m_mouseEvents},
         {"WindowEvents", m_windowEvents},
         {"FramebufferEvents", m_framebufferEvents},
-        {"IOpenGL_Context", *m_opengl_context}
+        {"IOpenGL_Context", *m_opengl_context},
+        {"WindowManipulation", m_windowManipulation}
     };
+
+    m_pimpl->topmost_before_time = std::chrono::system_clock::now();
 
     log("initialized successfully");
     return true;
+}
+
+void OpenGL_GLFW_Service::reset_window_topmost() {
+#ifdef _WIN32
+    std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
+    auto& topmost_before_time = m_pimpl->topmost_before_time;
+
+    if (now - topmost_before_time > std::chrono::seconds(1)) {
+        topmost_before_time = now;
+        // TODO fix this for EGL + Win
+        //log("Periodic reordering of windows.");
+        SetWindowPos(glfwGetWin32Window(m_pimpl->glfwContextWindowPtr), HWND_TOPMOST, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE);
+    }
+#endif
 }
 
 #define that static_cast<OpenGL_GLFW_Service*>(::glfwGetWindowUserPointer(wnd))
@@ -422,6 +516,8 @@ void OpenGL_GLFW_Service::register_glfw_callbacks() {
 
     // keyboard events
     ::glfwSetKeyCallback(window_ptr, [](GLFWwindow* wnd, int key, int scancode, int action, int mods){
+        // Fix mods, see: https://github.com/glfw/glfw/issues/1630
+        mods = fixGlfwKeyboardMods(mods, key, action);
         that->glfw_onKey_func(key, scancode, action, mods);
     });
 
@@ -523,7 +619,7 @@ void OpenGL_GLFW_Service::close() {
     ::glfwMakeContextCurrent(nullptr);
     ::glfwTerminate();
 }
-    
+
 void OpenGL_GLFW_Service::updateProvidedResources() {
     // poll events for all GLFW windows shared by this context. this also issues the callbacks.
     // note at this point there is no GL context active.
@@ -572,6 +668,10 @@ void OpenGL_GLFW_Service::postGraphRender() {
     //::glfwMakeContextCurrent(window_ptr);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | GL_ACCUM_BUFFER_BIT);
     //::glfwMakeContextCurrent(nullptr);
+
+    if (m_pimpl->config.windowPlacement.topMost) {
+        reset_window_topmost();
+    }
 }
 
 std::vector<FrontendResource>& OpenGL_GLFW_Service::getProvidedResources() {
@@ -677,11 +777,11 @@ void OpenGL_GLFW_Service::glfw_onPathDrop_func(const int path_count, const char*
 
 // { glfw calls used somewhere by imgui but not covered by this class
 // glfwGetWin32Window(g_Window);
-// 
+//
 // glfwGetMouseButton(g_Window, i) != 0;
 // glfwGetCursorPos(g_Window, &mouse_x, &mouse_y);
 // glfwSetCursorPos(g_Window, (double)mouse_pos_backup.x, (double)mouse_pos_backup.y);
-// 
+//
 // glfwSetCursor(g_Window, g_MouseCursors);
 // glfwGetInputMode(g_Window, GLFW_CURSOR) == GLFW_CURSOR_DISABLED)
 // glfwSetInputMode(g_Window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);

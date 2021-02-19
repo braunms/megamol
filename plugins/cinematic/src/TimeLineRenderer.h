@@ -8,11 +8,9 @@
 #ifndef MEGAMOL_CINEMATIC_TIMELINERENDERER_H_INCLUDED
 #define MEGAMOL_CINEMATIC_TIMELINERENDERER_H_INCLUDED
 
-#include "Cinematic/Cinematic.h"
-
 #include "mmcore/CallerSlot.h"
 #include "mmcore/view/Renderer2DModule.h"
-#include "mmcore/view/CallRender2D.h"
+#include "mmcore/view/CallRender2DGL.h"
 #include "mmcore/param/ParamSlot.h"
 #include "mmcore/utility/SDFFont.h"
 #include "mmcore/utility/ResourceWrapper.h"
@@ -103,7 +101,7 @@ namespace cinematic {
         *
         * @return The return value of the function.
         */
-        virtual bool GetExtents(core::view::CallRender2D& call);
+        virtual bool GetExtents(core::view::CallRender2DGL& call);
 
         /**
         * The render callback.
@@ -112,7 +110,7 @@ namespace cinematic {
         *
         * @return The return value of the function.
         */
-        virtual bool Render(core::view::CallRender2D& call);
+        virtual bool Render(core::view::CallRender2DGL& call);
 
         /** 
         * The mouse button pressed/released callback. 
@@ -157,7 +155,7 @@ namespace cinematic {
 
         std::array<AxisData, Axis::COUNT> axes;
         CinematicUtils                    utils;
-        GLuint                            texture;
+        GLuint                            texture_id;
         ActiveParam                       yAxisParam;
         Keyframe                          dragDropKeyframe;
         bool                              dragDropActive;

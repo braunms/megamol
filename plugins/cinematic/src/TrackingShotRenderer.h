@@ -8,8 +8,6 @@
 #ifndef MEGAMOL_CINEMATIC_TRACKINGSHOTRENDERER_H_INCLUDED
 #define MEGAMOL_CINEMATIC_TRACKINGSHOTRENDERER_H_INCLUDED
 
-#include "Cinematic/Cinematic.h"
-
 #include "mmcore/CallerSlot.h"
 #include "mmcore/CoreInstance.h"
 #include "mmcore/utility/SDFFont.h"
@@ -20,10 +18,9 @@
 #include "mmcore/param/EnumParam.h"
 #include "mmcore/param/FloatParam.h"
 #include "mmcore/param/FilePathParam.h"
-#include "mmcore/view/Renderer3DModule_2.h"
-#include "mmcore/view/CallRender3D_2.h"
-#include "mmcore/view/CallRenderView.h"
-#include "mmcore/view/View3D.h"
+#include "mmcore/view/Renderer3DModuleGL.h"
+#include "mmcore/view/CallRender3DGL.h"
+#include "mmcore/view/CallRenderViewGL.h"
 #include "mmcore/view/Input.h"
 
 #include "vislib/Trace.h"
@@ -48,7 +45,7 @@ namespace cinematic {
 	/**
 	* Tracking shot rendering.
 	*/
-	class TrackingShotRenderer : public core::view::Renderer3DModule_2 {
+	class TrackingShotRenderer : public core::view::Renderer3DModuleGL {
 	public:
 
 		/**
@@ -116,7 +113,7 @@ namespace cinematic {
 		*
 		* @return The return value of the function.
 		*/
-		virtual bool GetExtents(megamol::core::view::CallRender3D_2& call);
+		virtual bool GetExtents(megamol::core::view::CallRender3DGL& call);
 
 		/**
 		* The render callback.
@@ -125,7 +122,7 @@ namespace cinematic {
 		*
 		* @return The return value of the function.
 		*/
-		virtual bool Render(megamol::core::view::CallRender3D_2& call);
+		virtual bool Render(megamol::core::view::CallRender3DGL& call);
 
         /** 
         * The mouse button pressed/released callback. 

@@ -464,26 +464,21 @@ megamol::core::Call::ptr_type megamol::core::MegaMolGraph::FindCall(
     return call_it->callPtr;
 }
 
-megamol::core::ModuleList_t::iterator megamol::core::MegaMolGraph::find_module_by_prefix(std::string const& name) {
-    auto module_it = std::find_if(module_list_.begin(), module_list_.end(),
-        [&](auto const& module) 
-    {
-        const auto found = name.find(module.request.id);
-        return (found != std::string::npos) && found == 0; // substing found && substring starts at beginning
-    });
+static const auto check_module_is_prefix = [](std::string const& request, auto const& module) {
+        const auto& module_name = module.request.id;
+        const auto substring = request.substr(0, module_name.size());
+        return (module_name == substring) && // module name is prefix of request
+            (request.size() == module_name.size() // module name matches whole request
+            || (request.size() >= module_name.size()+2 && request.substr(module_name.size(), 2) == "::")); // OR request has :: after module name
+    };
 
-    return module_it;
+// find module where module name is prefix of request
+megamol::core::ModuleList_t::iterator megamol::core::MegaMolGraph::find_module_by_prefix(std::string const& request) {
+    return std::find_if(module_list_.begin(), module_list_.end(), [&](auto const& module){ return check_module_is_prefix(request, module); });
 }
 
-megamol::core::ModuleList_t::const_iterator megamol::core::MegaMolGraph::find_module_by_prefix(std::string const& name) const {
-    auto module_it = std::find_if(module_list_.begin(), module_list_.end(),
-        [&](auto const& module) 
-    {
-        const auto found = name.find(module.request.id);
-        return (found != std::string::npos) && found == 0; // substing found && substring starts at beginning
-    });
-
-    return module_it;
+megamol::core::ModuleList_t::const_iterator megamol::core::MegaMolGraph::find_module_by_prefix(std::string const& request) const {
+    return std::find_if(module_list_.begin(), module_list_.end(), [&](auto const& module){ return check_module_is_prefix(request, module); });
 }
 
 megamol::core::param::ParamSlot* megamol::core::MegaMolGraph::FindParameterSlot(std::string const& paramName) const {
@@ -658,56 +653,5 @@ std::vector<megamol::frontend::FrontendResource> megamol::core::MegaMolGraph::ge
 
 
     return result;
-}
-
-#include "mmcore/param/ButtonParam.h"
-std::string megamol::core::MegaMolGraph::SerializeGraph() const {
-
-    std::string serViews;
-    std::string serModules;
-    std::string serCalls;
-    std::string serParams;
-
-    for (auto& module : this->module_list_) {
-        if (module.isGraphEntryPoint) {
-            auto improvised_instance_name = "::"+splitPathName(module.request.id)[0];
-            serViews.append("mmCreateView(\"" + improvised_instance_name + "\",\"" + module.request.className + "\",\"" + module.request.id + "\")\n");
-        }
-    }
-
-    for (auto& module : this->module_list_) {
-        if (!module.isGraphEntryPoint) {
-            serModules.append("mmCreateModule(\"" + module.request.className + "\",\"" + module.request.id + "\")\n");
-        }
-    }
-
-    for (auto& module : this->module_list_) {
-        for (auto& paramSlot : this->EnumerateModuleParameterSlots(module.request.id)) {
-            // it seems serialiing button params is illegal
-            if (auto* p_ptr = paramSlot->template Param<core::param::ButtonParam>()) {
-                continue;
-            }
-            auto name = std::string{paramSlot->FullName()};
-            auto split = splitPathName(name);
-            // as FullName() prepends :: to module names, normalize multiple leading :: in parameter name path
-            name = std::accumulate(split.begin(), split.end(), std::string{""},
-                [](std::string const& value, std::string const& element) -> std::string
-                {
-                    return std::string{value + "::" + element};
-                });
-            auto value = std::string{paramSlot->Parameter()->ValueString().PeekBuffer()};
-            serParams.append("mmSetParamValue(\"" + name + "\",[=[" + value + "]=])\n");
-        }
-    }
-
-    for (auto& call : call_list_) {
-        serCalls.append("mmCreateCall(\""
-            + call.request.className + "\",\""
-            + call.request.from + "\",\""
-            + call.request.to + "\",\""
-            + "\")\n");
-    }
-
-    return serViews + "\n" + serModules + "\n" + serCalls + "\n" + serParams;
 }
 

@@ -20,11 +20,6 @@
 #include "mmcore/param/ParamSlot.h"
 #include "mmcore/param/StringParam.h"
 
-// Used for platform independent clipboard (ImGui so far only provides windows implementation)
-#ifdef GUI_USE_GLFW
-#include "GLFW/glfw3.h"
-#endif
-
 
 namespace megamol {
 namespace gui {
@@ -101,9 +96,8 @@ namespace gui {
         ImGuiID add_project_graph_uid;
         ImGuiID module_list_popup_hovered_group_uid;
         bool show_module_list_sidebar;
-        bool show_module_list_child;
+        bool show_module_list_popup;
         ImVec2 module_list_popup_pos;
-        bool module_list_popup_hovered;
         ImGuiID last_selected_callslot_uid;
         megamol::gui::GraphState_t graph_state;
         bool open_popup_load;
@@ -118,7 +112,7 @@ namespace gui {
         // FUNCTIONS --------------------------------------------------------------
 
         void draw_window_menu(megamol::core::CoreInstance* core_instance);
-        void draw_window_module_list(float width);
+        void draw_window_module_list(float width, float height, bool apply_focus);
 
         void drawPopUps(megamol::core::CoreInstance* core_instance);
 

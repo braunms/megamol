@@ -25,8 +25,6 @@
 #include "mmcore/CoreInstance.h"
 #include "mmcore/Module.h"
 #include "mmcore/cluster/ClusterController.h"
-#include "mmcore/cluster/ClusterViewMaster.h"
-#include "mmcore/cluster/simple/Server.h"
 #include "mmcore/job/JobThread.h"
 #include "mmcore/param/ButtonParam.h"
 #include "mmcore/param/ParamSlot.h"
@@ -35,6 +33,7 @@
 #include "mmcore/profiler/Manager.h"
 #include "mmcore/utility/APIValueUtil.h"
 #include "mmcore/utility/ProjectParser.h"
+#include "mmcore/utility/plugins/PluginRegister.h"
 #include "mmcore/utility/xml/XmlReader.h"
 #include "mmcore/versioninfo.h"
 #include "vislib/GUID.h"
@@ -363,22 +362,9 @@ void megamol::core::CoreInstance::Initialise(bool mmconsole_frontend_compatible)
         megamol::core::utility::LuaHostService::ID = this->InstallService<megamol::core::utility::LuaHostService>();
 
     // loading plugins
-    // printf("Log: %d:\n", (long)(&megamol::core::utility::log::Log::DefaultLog));
-    // printf("\tAutoflush: %s\n", megamol::core::utility::log::Log::DefaultLog.IsAutoFlushEnabled() ? "enabled" : "disabled");
-    // printf("\tLevel: %u\n", megamol::core::utility::log::Log::DefaultLog.GetLevel());
-    // printf("\tEcho-Level: %u\n", megamol::core::utility::log::Log::DefaultLog.GetEchoLevel());
-    // printf("\tEcho-Target: %d\n", (long)(megamol::core::utility::log::Log::DefaultLog.GetEchoOutTarget()));
-    vislib::SingleLinkedList<vislib::TString> plugins_paths;
-    this->config.ListPluginsToLoad(plugins_paths);
-    vislib::SingleLinkedList<vislib::TString>::Iterator iter = plugins_paths.GetIterator();
-    while (iter.HasNext()) {
-        this->loadPlugin(iter.Next());
+    for (const auto& plugin : utility::plugins::PluginRegister::getAll()) {
+        this->loadPlugin(plugin);
     }
-    // printf("Log: %d:\n", (long)(&megamol::core::utility::log::Log::DefaultLog));
-    // printf("\tAutoflush: %s\n", megamol::core::utility::log::Log::DefaultLog.IsAutoFlushEnabled() ? "enabled" : "disabled");
-    // printf("\tLevel: %u\n", megamol::core::utility::log::Log::DefaultLog.GetLevel());
-    // printf("\tEcho-Level: %u\n", megamol::core::utility::log::Log::DefaultLog.GetEchoLevel());
-    // printf("\tEcho-Target: %d\n", (long)(megamol::core::utility::log::Log::DefaultLog.GetEchoOutTarget()));
 
     // set up profiling manager
     if (this->config.IsConfigValueSet("profiling")) {
@@ -428,10 +414,10 @@ void megamol::core::CoreInstance::Initialise(bool mmconsole_frontend_compatible)
     vd->SetViewModuleID("view");
     this->builtinViewDescs.Register(vd);
 
-    // empty View2D
+    // empty View2DGL
     vd = std::make_shared<ViewDescription>("emptyview2d");
-    vd->AddModule(this->GetModuleDescriptionManager().Find("View2D"), "view");
-    // 'View2D' will show the title logo as long as no renderer is connected
+    vd->AddModule(this->GetModuleDescriptionManager().Find("View2DGL"), "view");
+    // 'View2DGL' will show the title logo as long as no renderer is connected
     vd->SetViewModuleID("view");
     this->builtinViewDescs.Register(vd);
 
@@ -2336,9 +2322,7 @@ void megamol::core::CoreInstance::SetupGraphFromNetwork(const void* data) {
             vislib::StringA modName(dat.GetBodyAsAt<char>(pos));
             pos += modName.Length() + 1;
 
-            if (modClass.Equals(cluster::ClusterViewMaster::ClassName()) ||
-                modClass.Equals(cluster::ClusterController::ClassName()) ||
-                modClass.Equals(cluster::simple::Server::ClassName())) {
+            if (modClass.Equals(cluster::ClusterController::ClassName()) ) {
                 // these are infra structure modules and not to be synced
                 continue;
             }
@@ -3181,7 +3165,7 @@ void megamol::core::CoreInstance::applyConfigParams(
 /*
  * megamol::core::CoreInstance::loadPlugin
  */
-void megamol::core::CoreInstance::loadPlugin(const vislib::TString& filename) {
+void megamol::core::CoreInstance::loadPlugin(const std::shared_ptr<utility::plugins::AbstractPluginDescriptor>& pluginDescriptor) {
 
     // select log level for plugin loading errors
     unsigned int loadFailedLevel = megamol::core::utility::log::Log::LEVEL_ERROR;
@@ -3204,37 +3188,32 @@ void megamol::core::CoreInstance::loadPlugin(const vislib::TString& filename) {
 
     try {
 
-        utility::plugins::PluginManager::collection_type new_plugins =
-            this->plugins->LoadPlugin(filename.PeekBuffer(), *this);
+        auto new_plugin = this->plugins->LoadPlugin(pluginDescriptor, *this);
 
-        for (auto new_plugin : new_plugins) {
-            megamol::core::utility::log::Log::DefaultLog.WriteMsg(megamol::core::utility::log::Log::LEVEL_INFO,
-                "Plugin \"%s\" (%s) loaded: %d Modules, %d Calls registered\n", new_plugin->GetAssemblyName().c_str(),
-                vislib::StringA(filename).PeekBuffer(), new_plugin->GetModuleDescriptionManager().Count(),
-                new_plugin->GetCallDescriptionManager().Count());
+        megamol::core::utility::log::Log::DefaultLog.WriteMsg(megamol::core::utility::log::Log::LEVEL_INFO,
+            "Plugin \"%s\" loaded: %d Modules, %d Calls registered\n", new_plugin->GetAssemblyName().c_str(),
+            new_plugin->GetModuleDescriptionManager().Count(), new_plugin->GetCallDescriptionManager().Count());
 
-            for (auto md : new_plugin->GetModuleDescriptionManager()) {
-                try {
-                    this->all_module_descriptions.Register(md);
-                } catch (const vislib::AlreadyExistsException&) {
-                    megamol::core::utility::log::Log::DefaultLog.WriteError("Failed to load module description \"%s\": Naming conflict", md->ClassName());
-                }
+        for (auto md : new_plugin->GetModuleDescriptionManager()) {
+            try {
+                this->all_module_descriptions.Register(md);
+            } catch (const vislib::AlreadyExistsException&) {
+                megamol::core::utility::log::Log::DefaultLog.WriteError("Failed to load module description \"%s\": Naming conflict", md->ClassName());
             }
-            for (auto cd : new_plugin->GetCallDescriptionManager()) {
-                try {
-                    this->all_call_descriptions.Register(cd);
-                } catch (const vislib::AlreadyExistsException&) {
-                    megamol::core::utility::log::Log::DefaultLog.WriteError("Failed to load call description \"%s\": Naming conflict", cd->ClassName());
-                }
+        }
+        for (auto cd : new_plugin->GetCallDescriptionManager()) {
+            try {
+                this->all_call_descriptions.Register(cd);
+            } catch (const vislib::AlreadyExistsException&) {
+                megamol::core::utility::log::Log::DefaultLog.WriteError("Failed to load call description \"%s\": Naming conflict", cd->ClassName());
             }
         }
 
     } catch (const vislib::Exception& vex) {
-        megamol::core::utility::log::Log::DefaultLog.WriteMsg(loadFailedLevel, "Unable to load Plugin \"%s\": %s (%s, &d)",
-            vislib::StringA(filename).PeekBuffer(), vex.GetMsgA(), vex.GetFile(), vex.GetLine());
+        megamol::core::utility::log::Log::DefaultLog.WriteMsg(loadFailedLevel, "Unable to load Plugin: %s (%s, &d)",
+            vex.GetMsgA(), vex.GetFile(), vex.GetLine());
     } catch (...) {
-        megamol::core::utility::log::Log::DefaultLog.WriteMsg(
-            loadFailedLevel, "Unable to load Plugin \"%s\": unknown exception", vislib::StringA(filename).PeekBuffer());
+        megamol::core::utility::log::Log::DefaultLog.WriteMsg(loadFailedLevel, "Unable to load Plugin: unknown exception");
     }
 }
 
@@ -3308,7 +3287,7 @@ bool megamol::core::CoreInstance::quickConnectUp(
         // test for end condition
         if (to == NULL) {
             for (SIZE_T i = 0; i < connInfo.Count(); i++) {
-                if (vislib::StringA("View2D").Equals(connInfo[i].nextMod->ClassName(), false) ||
+                if (vislib::StringA("View2DGL").Equals(connInfo[i].nextMod->ClassName(), false) ||
                     vislib::StringA("View3D").Equals(connInfo[i].nextMod->ClassName(), false) ||
                     vislib::StringA("View3D_2").Equals(connInfo[i].nextMod->ClassName(), false)) {
 

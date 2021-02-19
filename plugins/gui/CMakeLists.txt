@@ -17,7 +17,6 @@ if(BUILD_${EXPORT_NAME}_PLUGIN)
   file(GLOB_RECURSE source_files RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "src/*.cpp")
   file(GLOB_RECURSE header_files RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "src/*.h")
   file(GLOB_RECURSE resource_files RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "resources/*")
-  file(GLOB_RECURSE shader_files RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" "shaders/*")
 
   # glm
   require_external(glm)
@@ -30,15 +29,7 @@ if(BUILD_${EXPORT_NAME}_PLUGIN)
   require_external(imguizmoquat)
 
   # target definition
-  add_library(${PROJECT_NAME} SHARED ${public_header_files} ${header_files} ${source_files} ${imgui_files} ${shader_files} ${resource_files})
-  set_target_properties(${PROJECT_NAME} PROPERTIES SUFFIX ".mmplg")
-    
-  # glfw
-  if(USE_GLFW)
-    require_external(glfw3)
-    target_link_libraries(${PROJECT_NAME} PRIVATE glfw3)
-    target_compile_definitions(${PROJECT_NAME} PRIVATE GUI_USE_GLFW)
-  endif()
+  add_library(${PROJECT_NAME} STATIC ${public_header_files} ${header_files} ${source_files} ${imgui_files} ${resource_files})
 
   # Add C++ filesystem support.
   if(UNIX)
@@ -48,22 +39,18 @@ if(BUILD_${EXPORT_NAME}_PLUGIN)
   target_compile_definitions(${PROJECT_NAME} PRIVATE ${EXPORT_NAME}_EXPORTS IMGUI_IMPL_OPENGL_LOADER_GLAD)
   target_include_directories(${PROJECT_NAME} PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    "include" "src" 
+    "include" "src"
     "${SOURCE_DIR}/examples/" "${SOURCE_DIR}/misc/cpp/")
   target_link_libraries(${PROJECT_NAME} PRIVATE vislib core glad abstract_frontend_service PUBLIC imgui imguizmoquat)
 
   # Installation rules for generated files
-  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION "include")
+  #install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/ DESTINATION "include")
   install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/resources/ DESTINATION "share/resources")
-  install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/shaders/ DESTINATION "share/shaders")  
   if(WIN32)
-    install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION "bin")
-    install(TARGETS ${PROJECT_NAME} ARCHIVE DESTINATION "lib")
-    if (MSVC)
-      install(FILES $<TARGET_PDB_FILE:${PROJECT_NAME}> DESTINATION bin OPTIONAL)
-    endif()
+    #install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION "bin")
+    #install(TARGETS ${PROJECT_NAME} ARCHIVE DESTINATION "lib")
   else()
-    install(TARGETS ${PROJECT_NAME} DESTINATION "lib" EXPORT ${PROJECT_NAME}-target)
+    #install(TARGETS ${PROJECT_NAME} DESTINATION "lib" EXPORT ${PROJECT_NAME}-target)
   endif()
 
   # Grouping in Visual Studio
@@ -89,11 +76,12 @@ if(BUILD_${EXPORT_NAME}_PLUGIN)
   source_group("Version" FILES ${version_files})
   source_group("ImGui Files" FILES ${imgui_files})
   source_group("Resources" FILES ${resource_files})
-  source_group("Shaders" FILES ${shader_files})  
 
   # Format
   add_clang_format(${PROJECT_NAME}
     STYLE "${CMAKE_SOURCE_DIR}/.clang-format"
     FILES ${public_header_files} ${header_files} ${source_files})
 
+  # Register plugin
+  megamol_register_plugin(${PROJECT_NAME})
 endif()

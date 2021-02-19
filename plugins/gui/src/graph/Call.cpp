@@ -84,7 +84,7 @@ bool megamol::gui::Call::DisconnectCallSlots(ImGuiID calling_callslot_uid) {
                 callslot_map.second.reset();
             }
         }
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return false;
@@ -105,4 +105,18 @@ const megamol::gui::CallSlotPtr_t& megamol::gui::Call::GetCallSlot(megamol::gui:
         /// __FILE__, __FUNCTION__, __LINE__);
     }
     return this->connected_callslots[type];
+}
+
+
+const std::string megamol::gui::Call::GetSlotsLabel(void) {
+
+    std::string caller = "n/a";
+    std::string callee = "n/a";
+    auto callerslot_ptr = this->GetCallSlot(CallSlotType::CALLER);
+    auto calleeslot_ptr = this->GetCallSlot(CallSlotType::CALLEE);
+    if (callerslot_ptr != nullptr)
+        caller = callerslot_ptr->name;
+    if (calleeslot_ptr != nullptr)
+        callee = calleeslot_ptr->name;
+    return std::string("[" + caller + "] > [" + callee + "]");
 }

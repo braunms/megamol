@@ -24,25 +24,31 @@ megamol::gui::ParameterPresentation::ParameterPresentation(Param_t type)
         , widget_store()
         , set_focus(0)
         , guistate_dirty(false)
+        , show_minmax(false)
         , tf_editor_external_ptr(nullptr)
-        , tf_editor_internal()
+        , tf_editor_inplace()
         , use_external_tf_editor(false)
         , show_tf_editor(false)
         , tf_editor_hash(0)
         , file_browser()
         , tooltip()
         , image_widget()
-        , rotation_widget()
-        , show_minmax(false) {
+        , rotation_widget() {
 
     this->InitPresentation(type);
 }
 
 
-megamol::gui::ParameterPresentation::~ParameterPresentation(void) {}
+megamol::gui::ParameterPresentation::~ParameterPresentation(void) {
+
+    if (this->tf_editor_external_ptr != nullptr) {
+        this->tf_editor_external_ptr->SetConnectedParameter(nullptr, "");
+    }
+}
 
 
-bool megamol::gui::ParameterPresentation::Present(megamol::gui::Parameter& inout_parameter, WidgetScope scope) {
+bool megamol::gui::ParameterPresentation::Present(
+    megamol::gui::Parameter& inout_parameter, WidgetScope scope, const std::string& module_fullname) {
 
     bool retval = false;
 
@@ -71,7 +77,7 @@ bool megamol::gui::ParameterPresentation::Present(megamol::gui::Parameter& inout
                         this->SetGUIVisible(!this->IsGUIVisible());
                         this->ForceSetGUIStateDirty();
                     }
-                    this->tooltip.ToolTip("Visibility", ImGui::GetItemID(), 0.5f);
+                    this->tooltip.ToolTip("Visibility", ImGui::GetItemID(), 1.0f, 3.0f);
 
                     ImGui::SameLine();
 
@@ -81,7 +87,7 @@ bool megamol::gui::ParameterPresentation::Present(megamol::gui::Parameter& inout
                         this->SetGUIReadOnly(read_only);
                         this->ForceSetGUIStateDirty();
                     }
-                    this->tooltip.ToolTip("Read-Only", ImGui::GetItemID(), 0.5f);
+                    this->tooltip.ToolTip("Read-Only", ImGui::GetItemID(), 1.0f, 3.0f);
 
                     ImGui::SameLine();
 
@@ -100,7 +106,14 @@ bool megamol::gui::ParameterPresentation::Present(megamol::gui::Parameter& inout
                         }
                         ImGui::EndPopup();
                     }
-                    this->tooltip.ToolTip("Presentation", ImGui::GetItemID(), 0.5f);
+                    this->tooltip.ToolTip("Presentation", ImGui::GetItemID(), 1.0f, 3.0f);
+
+                    ImGui::SameLine();
+
+                    // Lua
+                    ParameterPresentation::LuaButton("param_lua_button", inout_parameter.GetValueString(),
+                        inout_parameter.full_name, module_fullname);
+                    this->tooltip.ToolTip("Copy lua command to clipboard.", ImGui::GetItemID(), 1.0f, 3.0f);
 
                     ImGui::SameLine();
                 }
@@ -113,7 +126,9 @@ bool megamol::gui::ParameterPresentation::Present(megamol::gui::Parameter& inout
                 ImGui::SameLine();
 
                 /// POSTFIX ------------------------------------------------
-                this->tooltip.ToolTip(this->description, ImGui::GetItemID(), 0.5f);
+                if (!ImGui::IsItemActive()) {
+                    this->tooltip.ToolTip(this->description, ImGui::GetItemID(), 1.0f, 4.0f);
+                }
                 this->tooltip.Marker(this->help);
 
                 ImGui::EndGroup();
@@ -132,7 +147,7 @@ bool megamol::gui::ParameterPresentation::Present(megamol::gui::Parameter& inout
 
         ImGui::PopID();
 
-    } catch (std::exception e) {
+    } catch (std::exception& e) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
             "[GUI] Error: %s [%s, %s, line %d]\n", e.what(), __FILE__, __FUNCTION__, __LINE__);
         return false;
@@ -155,20 +170,20 @@ void megamol::gui::ParameterPresentation::LoadTransferFunctionTexture(
 
 bool megamol::gui::ParameterPresentation::OptionButton(const std::string& id, const std::string& label, bool dirty) {
 
+    assert(ImGui::GetCurrentContext() != nullptr);
+    ImGuiStyle& style = ImGui::GetStyle();
+
     bool retval = false;
     std::string widget_name("option_button");
     std::string widget_id = widget_name + id;
     ImGui::PushID(widget_id.c_str());
 
-    assert(ImGui::GetCurrentContext() != nullptr);
-    ImGuiStyle& style = ImGui::GetStyle();
-
-    float knob_size = ImGui::GetFrameHeight();
-    float half_knob_size = knob_size / 2.0f;
+    float button_size = ImGui::GetFrameHeight();
+    float half_button_size = button_size / 2.0f;
     ImVec2 widget_start_pos = ImGui::GetCursorScreenPos();
 
     if (!label.empty()) {
-        float text_x_offset_pos = knob_size + style.ItemInnerSpacing.x;
+        float text_x_offset_pos = button_size + style.ItemInnerSpacing.x;
         ImGui::SetCursorScreenPos(widget_start_pos + ImVec2(text_x_offset_pos, 0.0f));
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(label.c_str());
@@ -177,13 +192,13 @@ bool megamol::gui::ParameterPresentation::OptionButton(const std::string& id, co
 
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertFloat4ToU32(style.Colors[ImGuiCol_FrameBg]));
     auto child_flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove;
-    ImGui::BeginChild("special_button_background", ImVec2(knob_size, knob_size), false, child_flags);
+    ImGui::BeginChild("special_button_background", ImVec2(button_size, button_size), false, child_flags);
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     assert(draw_list != nullptr);
 
-    float thickness = knob_size / 5.0f;
-    ImVec2 center = widget_start_pos + ImVec2(half_knob_size, half_knob_size);
+    float thickness = button_size / 5.0f;
+    ImVec2 center = widget_start_pos + ImVec2(half_button_size, half_button_size);
     ImU32 color_front = ImGui::ColorConvertFloat4ToU32(style.Colors[ImGuiCol_ButtonActive]);
     if (dirty) {
         color_front = ImGui::ColorConvertFloat4ToU32(GUI_COLOR_BUTTON_MODIFIED);
@@ -191,7 +206,7 @@ bool megamol::gui::ParameterPresentation::OptionButton(const std::string& id, co
     draw_list->AddCircleFilled(center, thickness, color_front, 12);
     draw_list->AddCircle(center, 2.0f * thickness, color_front, 12, (thickness / 2.0f));
 
-    ImVec2 rect = ImVec2(knob_size, knob_size);
+    ImVec2 rect = ImVec2(button_size, button_size);
     retval = ImGui::InvisibleButton("special_button", rect);
 
     ImGui::EndChild();
@@ -206,6 +221,9 @@ bool megamol::gui::ParameterPresentation::OptionButton(const std::string& id, co
 bool megamol::gui::ParameterPresentation::KnobButton(
     const std::string& id, float size, float& inout_value, float minval, float maxval) {
 
+    assert(ImGui::GetCurrentContext() != nullptr);
+    ImGuiStyle& style = ImGui::GetStyle();
+
     bool retval = false;
 
     const float pi = 3.14159265358f;
@@ -214,8 +232,6 @@ bool megamol::gui::ParameterPresentation::KnobButton(
     std::string widget_id = widget_name + id;
     ImGui::PushID(widget_id.c_str());
 
-    assert(ImGui::GetCurrentContext() != nullptr);
-    ImGuiStyle& style = ImGui::GetStyle();
     ImVec2 widget_start_pos = ImGui::GetCursorScreenPos();
 
     const float thickness = size / 15.0f;
@@ -297,9 +313,17 @@ bool megamol::gui::ParameterPresentation::KnobButton(
 }
 
 
-bool megamol::gui::ParameterPresentation::ParameterExtendedModeButton(bool& inout_extended_mode) {
+bool megamol::gui::ParameterPresentation::ParameterExtendedModeButton(
+    const std::string& id, bool& inout_extended_mode) {
+
+    assert(ImGui::GetCurrentContext() != nullptr);
 
     bool retval = false;
+
+    std::string widget_name("param_extend_button");
+    std::string widget_id = widget_name + id;
+    ImGui::PushID(widget_id.c_str());
+
     ImGui::BeginGroup();
 
     megamol::gui::ParameterPresentation::OptionButton("param_mode_button", "Mode");
@@ -315,6 +339,67 @@ bool megamol::gui::ParameterPresentation::ParameterExtendedModeButton(bool& inou
         ImGui::EndPopup();
     }
     ImGui::EndGroup();
+
+    ImGui::PopID();
+
+    return retval;
+}
+
+
+bool megamol::gui::ParameterPresentation::LuaButton(const std::string& id, const std::string& param_value,
+    const std::string& param_fullname, const std::string& module_fullname) {
+
+    assert(ImGui::GetCurrentContext() != nullptr);
+    ImGuiStyle& style = ImGui::GetStyle();
+
+    bool retval = false;
+
+    std::string widget_name("lua_button");
+    std::string widget_id = widget_name + id;
+    ImGui::PushID(widget_id.c_str());
+
+    float button_size = ImGui::GetFrameHeight();
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImGui::ColorConvertFloat4ToU32(style.Colors[ImGuiCol_FrameBg]));
+    auto child_flags = ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoMove;
+    ImGui::BeginChild("lua_button_background", ImVec2(button_size, button_size), false, child_flags);
+
+    ImDrawList* draw_list = ImGui::GetWindowDrawList();
+    assert(draw_list != nullptr);
+
+    const ImU32 COLOR_TEXT = ImGui::ColorConvertFloat4ToU32(style.Colors[ImGuiCol_ButtonHovered]);
+    ImVec2 button_start_pos = ImGui::GetCursorScreenPos();
+    ImVec2 button_middle = button_start_pos + ImVec2(button_size / 2.0f, button_size / 2.0f);
+    const std::string button_label = "lua";
+    ImVec2 text_size = ImGui::CalcTextSize(button_label.c_str());
+    ImVec2 text_pos_left_upper = button_middle - ImVec2(text_size.x / 2.0f, text_size.y / 2.0f);
+    draw_list->AddText(text_pos_left_upper, COLOR_TEXT, button_label.c_str());
+
+    ImVec2 rect = ImVec2(button_size, button_size);
+    retval = ImGui::InvisibleButton("lua_invisible_button", rect);
+
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+
+    if (ImGui::BeginPopupContextItem("param_lua_button_context", 0)) {
+        bool copy_to_clipboard = false;
+        std::string lua_param_cmd;
+        std::string mod_name(module_fullname.c_str()); /// local copy required
+        if (ImGui::MenuItem("Copy mmSetParamValue")) {
+            lua_param_cmd = "mmSetParamValue(\"" + mod_name + "::" + param_fullname + "\",[=[" + param_value + "]=])";
+            copy_to_clipboard = true;
+        }
+        if (ImGui::MenuItem("Copy mmGetParamValue")) {
+            lua_param_cmd = "mmGetParamValue(\"" + mod_name + "::" + param_fullname + "\")";
+            copy_to_clipboard = true;
+        }
+
+        if (copy_to_clipboard) {
+            ImGui::SetClipboardText(lua_param_cmd.c_str());
+        }
+        ImGui::EndPopup();
+    }
+
+    ImGui::PopID();
 
     return retval;
 }
@@ -571,7 +656,7 @@ bool megamol::gui::ParameterPresentation::present_parameter(
             }
         } break;
             // PIN VALUE TO MOUSE //////////////////////////////////////
-        case (Present_t::PinValueToMouse): {
+        case (Present_t::PinMouse): {
             bool compatible_type = false;
             // FLOAT -----------------------------------------------
             if constexpr (std::is_same_v<T, float>) {
@@ -621,8 +706,73 @@ bool megamol::gui::ParameterPresentation::present_parameter(
                 error = false;
             }
         } break;
+            // SLIDER ////////////////////////////////////////////////
+            // DRAG //////////////////////////////////////////////////
+        case (Present_t::Slider):
+        case (Present_t::Drag): {
+            // FLOAT -----------------------------------------------
+            if constexpr (std::is_same_v<T, float>) {
+                auto value = arg;
+                if (this->widget_float(scope, param_label, value, inout_parameter.GetMinValue<T>(),
+                        inout_parameter.GetMaxValue<T>())) {
+                    inout_parameter.SetValue(value);
+                    retval = true;
+                }
+                error = false;
+            } else if constexpr (std::is_same_v<T, int>) {
+                switch (inout_parameter.type) {
+                    // INT ---------------------------------------------
+                case (Param_t::INT): {
+                    auto value = arg;
+                    if (this->widget_int(scope, param_label, value, inout_parameter.GetMinValue<T>(),
+                            inout_parameter.GetMaxValue<T>())) {
+                        inout_parameter.SetValue(value);
+                        retval = true;
+                    }
+                    error = false;
+                } break;
+                default:
+                    break;
+                }
+            }
+            // VECTOR 2 --------------------------------------------
+            else if constexpr (std::is_same_v<T, glm::vec2>) {
+                auto value = arg;
+                if (this->widget_vector2f(scope, param_label, value, inout_parameter.GetMinValue<T>(),
+                        inout_parameter.GetMaxValue<T>())) {
+                    inout_parameter.SetValue(value);
+                    retval = true;
+                }
+                error = false;
+            }
+            // VECTOR 3 --------------------------------------------
+            else if constexpr (std::is_same_v<T, glm::vec3>) {
+                auto value = arg;
+                if (this->widget_vector3f(scope, param_label, value, inout_parameter.GetMinValue<T>(),
+                        inout_parameter.GetMaxValue<T>())) {
+                    inout_parameter.SetValue(value);
+                    retval = true;
+                }
+                error = false;
+            } else if constexpr (std::is_same_v<T, glm::vec4>) {
+                switch (inout_parameter.type) {
+                    // VECTOR 4 ----------------------------------------
+                case (Param_t::VECTOR4F): {
+                    auto value = arg;
+                    if (this->widget_vector4f(scope, param_label, value, inout_parameter.GetMinValue<T>(),
+                            inout_parameter.GetMaxValue<T>())) {
+                        inout_parameter.SetValue(value);
+                        retval = true;
+                    }
+                    error = false;
+                } break;
+                default:
+                    break;
+                }
+            }
+        } break;
             // 3D ROTATION //////////////////////////////////////////////////
-        case (Present_t::Rotation3D_Axes): {
+        case (Present_t::Rotation): {
             // FLOAT -----------------------------------------------
             if constexpr (std::is_same_v<T, glm::vec4>) {
                 switch (inout_parameter.type) {
@@ -642,7 +792,7 @@ bool megamol::gui::ParameterPresentation::present_parameter(
             }
         } break;
             // 3D DIRECTION //////////////////////////////////////////////////
-        case (Present_t::Rotation3D_Direction): {
+        case (Present_t::Direction): {
             // FLOAT -----------------------------------------------
             if constexpr (std::is_same_v<T, glm::vec3>) {
                 switch (inout_parameter.type) {
@@ -753,16 +903,10 @@ bool megamol::gui::ParameterPresentation::widget_string(
         int multiline_cnt = static_cast<int>(std::count(
             std::get<std::string>(this->widget_store).begin(), std::get<std::string>(this->widget_store).end(), '\n'));
         multiline_cnt = std::min(static_cast<int>(GUI_MAX_MULITLINE), multiline_cnt);
-        /// if (multiline_cnt == 0) {
-        ///    ImGui::InputText(hidden_label.c_str(), &std::get<std::string>(this->widget_store),
-        ///    ImGuiInputTextFlags_CtrlEnterForNewLine);
-        ///}
-        /// else {
         ImVec2 multiline_size = ImVec2(ImGui::CalcItemWidth(),
             ImGui::GetFrameHeightWithSpacing() + (ImGui::GetFontSize() * static_cast<float>(multiline_cnt)));
         ImGui::InputTextMultiline(hidden_label.c_str(), &std::get<std::string>(this->widget_store), multiline_size,
             ImGuiInputTextFlags_CtrlEnterForNewLine);
-        ///}
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             std::string utf8Str = std::get<std::string>(this->widget_store);
             GUIUtils::Utf8Decode(utf8Str);
@@ -905,7 +1049,8 @@ bool megamol::gui::ParameterPresentation::widget_filepath(
         ImGuiStyle& style = ImGui::GetStyle();
         float widget_width = ImGui::CalcItemWidth() - (ImGui::GetFrameHeightWithSpacing() + style.ItemSpacing.x);
         ImGui::PushItemWidth(widget_width);
-        bool button_edit = this->file_browser.Button(std::get<std::string>(this->widget_store));
+        bool button_edit = this->file_browser.Button(
+            std::get<std::string>(this->widget_store), megamol::gui::FileBrowserWidget::FileBrowserFlag::SELECT, "");
         ImGui::SameLine();
         ImGui::InputText(label.c_str(), &std::get<std::string>(this->widget_store), ImGuiInputTextFlags_None);
         if (button_edit || ImGui::IsItemDeactivatedAfterEdit()) {
@@ -964,6 +1109,8 @@ bool megamol::gui::ParameterPresentation::widget_int(megamol::gui::ParameterPres
         if (!std::holds_alternative<int>(this->widget_store)) {
             this->widget_store = value;
         }
+        auto p = this->GetGUIPresentation();
+
         // Min Max Values
         ImGui::BeginGroup();
         if (ImGui::ArrowButton("###_min_max", ((this->show_minmax) ? (ImGuiDir_Down) : (ImGuiDir_Up)))) {
@@ -981,8 +1128,19 @@ bool megamol::gui::ParameterPresentation::widget_int(megamol::gui::ParameterPres
         }
 
         // Value
-        ImGui::InputInt(
-            label.c_str(), &std::get<int>(this->widget_store), min_step_size, max_step_size, ImGuiInputTextFlags_None);
+        if (p == Present_t::Slider) {
+            const int offset = 2;
+            auto slider_min = (minval > INT_MIN) ? (minval) : ((value == 0) ? (-offset) : (value - (offset * value)));
+            auto slider_max = (maxval < INT_MAX) ? (maxval) : ((value == 0) ? (offset) : (value + (offset * value)));
+            ImGui::SliderInt(label.c_str(), &std::get<int>(this->widget_store), slider_min, slider_max);
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else if (p == Present_t::Drag) {
+            ImGui::DragInt(label.c_str(), &std::get<int>(this->widget_store), min_step_size, minval, maxval);
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else { // Present_t::Basic
+            ImGui::InputInt(label.c_str(), &std::get<int>(this->widget_store), min_step_size, max_step_size,
+                ImGuiInputTextFlags_None);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             this->widget_store = std::max(minval, std::min(std::get<int>(this->widget_store), maxval));
             value = std::get<int>(this->widget_store);
@@ -1013,13 +1171,18 @@ bool megamol::gui::ParameterPresentation::widget_float(megamol::gui::ParameterPr
         if (!std::holds_alternative<float>(this->widget_store)) {
             this->widget_store = value;
         }
-        // Min Max Values
+
+        auto p = this->GetGUIPresentation();
         ImGui::BeginGroup();
-        if (ImGui::ArrowButton("###_min_max", ((this->show_minmax) ? (ImGuiDir_Down) : (ImGuiDir_Up)))) {
-            this->show_minmax = !this->show_minmax;
+
+        // Min Max Option
+        if ((p == Present_t::Basic) || (p == Present_t::Slider) || (p == Present_t::Drag)) {
+            if (ImGui::ArrowButton("###_min_max", ((this->show_minmax) ? (ImGuiDir_Down) : (ImGuiDir_Up)))) {
+                this->show_minmax = !this->show_minmax;
+            }
+            this->tooltip.ToolTip("Min/Max Values");
+            ImGui::SameLine();
         }
-        this->tooltip.ToolTip("Min/Max Values");
-        ImGui::SameLine();
 
         // Relative step size
         float min_step_size = 1.0f;
@@ -1030,8 +1193,21 @@ bool megamol::gui::ParameterPresentation::widget_float(megamol::gui::ParameterPr
         }
 
         // Value
-        ImGui::InputFloat(label.c_str(), &std::get<float>(this->widget_store), min_step_size, max_step_size,
-            this->float_format.c_str(), ImGuiInputTextFlags_None);
+        if (p == Present_t::Slider) {
+            const float offset = 2.0f;
+            auto slider_min =
+                (minval > -FLT_MAX) ? (minval) : ((value == 0.0f) ? (-offset) : (value - (offset * value)));
+            auto slider_max = (maxval < FLT_MAX) ? (maxval) : ((value == 0.0f) ? (offset) : (value + (offset * value)));
+            ImGui::SliderFloat(label.c_str(), &std::get<float>(this->widget_store), slider_min, slider_max,
+                this->float_format.c_str());
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else if (p == Present_t::Drag) {
+            ImGui::DragFloat(label.c_str(), &std::get<float>(this->widget_store), min_step_size, minval, maxval);
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else { // Present_t::Basic
+            ImGui::InputFloat(label.c_str(), &std::get<float>(this->widget_store), min_step_size, max_step_size,
+                this->float_format.c_str(), ImGuiInputTextFlags_None);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             this->widget_store = std::max(minval, std::min(std::get<float>(this->widget_store), maxval));
             value = std::get<float>(this->widget_store);
@@ -1039,15 +1215,19 @@ bool megamol::gui::ParameterPresentation::widget_float(megamol::gui::ParameterPr
         } else if (!ImGui::IsItemActive() && !ImGui::IsItemEdited()) {
             this->widget_store = value;
         }
-        if (this->show_minmax) {
-            GUIUtils::ReadOnlyWigetStyle(true);
-            auto min_value = minval;
-            ImGui::InputFloat("Min Value", &min_value, min_step_size, max_step_size, this->float_format.c_str(),
-                ImGuiInputTextFlags_None);
-            auto max_value = maxval;
-            ImGui::InputFloat("Max Value", &max_value, min_step_size, max_step_size, this->float_format.c_str(),
-                ImGuiInputTextFlags_None);
-            GUIUtils::ReadOnlyWigetStyle(false);
+
+        // Min Max Values
+        if ((p == Present_t::Basic) || (p == Present_t::Slider) || (p == Present_t::Drag)) {
+            if (this->show_minmax) {
+                GUIUtils::ReadOnlyWigetStyle(true);
+                auto min_value = minval;
+                ImGui::InputFloat("Min Value", &min_value, min_step_size, max_step_size, this->float_format.c_str(),
+                    ImGuiInputTextFlags_None);
+                auto max_value = maxval;
+                ImGui::InputFloat("Max Value", &max_value, min_step_size, max_step_size, this->float_format.c_str(),
+                    ImGuiInputTextFlags_None);
+                GUIUtils::ReadOnlyWigetStyle(false);
+            }
         }
         ImGui::EndGroup();
     }
@@ -1064,16 +1244,46 @@ bool megamol::gui::ParameterPresentation::widget_vector2f(megamol::gui::Paramete
         if (!std::holds_alternative<glm::vec2>(this->widget_store)) {
             this->widget_store = value;
         }
-        // Min Max Values
+
+        auto p = this->GetGUIPresentation();
         ImGui::BeginGroup();
-        if (ImGui::ArrowButton("###_min_max", ((this->show_minmax) ? (ImGuiDir_Down) : (ImGuiDir_Up)))) {
-            this->show_minmax = !this->show_minmax;
+
+        // Min Max Option
+        if ((p == Present_t::Basic) || (p == Present_t::Slider) || (p == Present_t::Drag)) {
+            if (ImGui::ArrowButton("###_min_max", ((this->show_minmax) ? (ImGuiDir_Down) : (ImGuiDir_Up)))) {
+                this->show_minmax = !this->show_minmax;
+            }
+            this->tooltip.ToolTip("Min/Max Values");
+            ImGui::SameLine();
         }
-        this->tooltip.ToolTip("Min/Max Values");
-        ImGui::SameLine();
+        float vec_min = std::max(minval.x, minval.y);
+        float vec_max = std::min(maxval.x, maxval.y);
+
         // Value
-        ImGui::InputFloat2(label.c_str(), glm::value_ptr(std::get<glm::vec2>(this->widget_store)),
-            this->float_format.c_str(), ImGuiInputTextFlags_None);
+        if (p == Present_t::Slider) {
+            const float offset = 2.0f;
+            float value_min = std::min(value.x, value.y);
+            float value_max = std::max(value.x, value.y);
+            auto slider_min =
+                std::max(vec_min, ((value_min == 0.0f) ? (-offset) : (value_min - (offset * fabsf(value_min)))));
+            auto slider_max =
+                std::min(vec_max, ((value_max == 0.0f) ? (offset) : (value_max + (offset * fabsf(value_max)))));
+            ImGui::SliderFloat2(label.c_str(), glm::value_ptr(std::get<glm::vec2>(this->widget_store)), slider_min,
+                slider_max, this->float_format.c_str());
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else if (p == Present_t::Drag) {
+            // Relative step size
+            float min_step_size = 1.0f;
+            if ((vec_min > -FLT_MAX) && (vec_max < FLT_MAX)) {
+                min_step_size = (vec_max - vec_min) * 0.003f; // 0.3%
+            }
+            ImGui::DragFloat2(label.c_str(), glm::value_ptr(std::get<glm::vec2>(this->widget_store)), min_step_size,
+                vec_min, vec_max);
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else { // Present_t::Basic
+            ImGui::InputFloat2(label.c_str(), glm::value_ptr(std::get<glm::vec2>(this->widget_store)),
+                this->float_format.c_str(), ImGuiInputTextFlags_None);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             auto x = std::max(minval.x, std::min(std::get<glm::vec2>(this->widget_store).x, maxval.x));
             auto y = std::max(minval.y, std::min(std::get<glm::vec2>(this->widget_store).y, maxval.y));
@@ -1083,15 +1293,19 @@ bool megamol::gui::ParameterPresentation::widget_vector2f(megamol::gui::Paramete
         } else if (!ImGui::IsItemActive() && !ImGui::IsItemEdited()) {
             this->widget_store = value;
         }
-        if (this->show_minmax) {
-            GUIUtils::ReadOnlyWigetStyle(true);
-            auto min_value = minval;
-            ImGui::InputFloat2(
-                "Min Value", glm::value_ptr(min_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
-            auto max_value = maxval;
-            ImGui::InputFloat2(
-                "Max Value", glm::value_ptr(max_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
-            GUIUtils::ReadOnlyWigetStyle(false);
+
+        // Min Max Values
+        if ((p == Present_t::Basic) || (p == Present_t::Slider) || (p == Present_t::Drag)) {
+            if (this->show_minmax) {
+                GUIUtils::ReadOnlyWigetStyle(true);
+                auto min_value = minval;
+                ImGui::InputFloat2(
+                    "Min Value", glm::value_ptr(min_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
+                auto max_value = maxval;
+                ImGui::InputFloat2(
+                    "Max Value", glm::value_ptr(max_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
+                GUIUtils::ReadOnlyWigetStyle(false);
+            }
         }
         ImGui::EndGroup();
     }
@@ -1108,16 +1322,47 @@ bool megamol::gui::ParameterPresentation::widget_vector3f(megamol::gui::Paramete
         if (!std::holds_alternative<glm::vec3>(this->widget_store)) {
             this->widget_store = value;
         }
-        // Min Max Values
+
+        auto p = this->GetGUIPresentation();
         ImGui::BeginGroup();
-        if (ImGui::ArrowButton("###_min_max", ((this->show_minmax) ? (ImGuiDir_Down) : (ImGuiDir_Up)))) {
-            this->show_minmax = !this->show_minmax;
+
+        // Min Max Option
+        if ((p == Present_t::Basic) || (p == Present_t::Slider) || (p == Present_t::Drag)) {
+            if (ImGui::ArrowButton("###_min_max", ((this->show_minmax) ? (ImGuiDir_Down) : (ImGuiDir_Up)))) {
+                this->show_minmax = !this->show_minmax;
+            }
+            this->tooltip.ToolTip("Min/Max Values");
+            ImGui::SameLine();
         }
-        this->tooltip.ToolTip("Min/Max Values");
-        ImGui::SameLine();
+
+        float vec_min = std::max(minval.x, std::max(minval.y, minval.z));
+        float vec_max = std::min(maxval.x, std::min(maxval.y, maxval.z));
+
         // Value
-        ImGui::InputFloat3(label.c_str(), glm::value_ptr(std::get<glm::vec3>(this->widget_store)),
-            this->float_format.c_str(), ImGuiInputTextFlags_None);
+        if (p == Present_t::Slider) {
+            const float offset = 2.0f;
+            float value_min = std::min(value.x, std::min(value.y, value.z));
+            float value_max = std::max(value.x, std::max(value.y, value.z));
+            auto slider_min =
+                std::max(vec_min, ((value_min == 0.0f) ? (-offset) : (value_min - (offset * fabsf(value_min)))));
+            auto slider_max =
+                std::min(vec_max, ((value_max == 0.0f) ? (offset) : (value_max + (offset * fabsf(value_max)))));
+            ImGui::SliderFloat3(label.c_str(), glm::value_ptr(std::get<glm::vec3>(this->widget_store)), slider_min,
+                slider_max, this->float_format.c_str());
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else if (p == Present_t::Drag) {
+            // Relative step size
+            float min_step_size = 1.0f;
+            if ((vec_min > -FLT_MAX) && (vec_max < FLT_MAX)) {
+                min_step_size = (vec_max - vec_min) * 0.003f; // 0.3%
+            }
+            ImGui::DragFloat3(label.c_str(), glm::value_ptr(std::get<glm::vec3>(this->widget_store)), min_step_size,
+                vec_min, vec_max);
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else { // Present_t::Basic
+            ImGui::InputFloat3(label.c_str(), glm::value_ptr(std::get<glm::vec3>(this->widget_store)),
+                this->float_format.c_str(), ImGuiInputTextFlags_None);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             auto x = std::max(minval.x, std::min(std::get<glm::vec3>(this->widget_store).x, maxval.x));
             auto y = std::max(minval.y, std::min(std::get<glm::vec3>(this->widget_store).y, maxval.y));
@@ -1128,15 +1373,19 @@ bool megamol::gui::ParameterPresentation::widget_vector3f(megamol::gui::Paramete
         } else if (!ImGui::IsItemActive() && !ImGui::IsItemEdited()) {
             this->widget_store = value;
         }
-        if (this->show_minmax) {
-            GUIUtils::ReadOnlyWigetStyle(true);
-            auto min_value = minval;
-            ImGui::InputFloat3(
-                "Min Value", glm::value_ptr(min_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
-            auto max_value = maxval;
-            ImGui::InputFloat3(
-                "Max Value", glm::value_ptr(max_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
-            GUIUtils::ReadOnlyWigetStyle(false);
+
+        // Min Max Values
+        if ((p == Present_t::Basic) || (p == Present_t::Slider) || (p == Present_t::Drag)) {
+            if (this->show_minmax) {
+                GUIUtils::ReadOnlyWigetStyle(true);
+                auto min_value = minval;
+                ImGui::InputFloat3(
+                    "Min Value", glm::value_ptr(min_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
+                auto max_value = maxval;
+                ImGui::InputFloat3(
+                    "Max Value", glm::value_ptr(max_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
+                GUIUtils::ReadOnlyWigetStyle(false);
+            }
         }
         ImGui::EndGroup();
     }
@@ -1153,16 +1402,46 @@ bool megamol::gui::ParameterPresentation::widget_vector4f(megamol::gui::Paramete
         if (!std::holds_alternative<glm::vec4>(this->widget_store)) {
             this->widget_store = value;
         }
-        // Min Max Values
+
+        auto p = this->GetGUIPresentation();
         ImGui::BeginGroup();
-        if (ImGui::ArrowButton("###_min_max", ((this->show_minmax) ? (ImGuiDir_Down) : (ImGuiDir_Up)))) {
-            this->show_minmax = !this->show_minmax;
+
+        // Min Max Option
+        if ((p == Present_t::Basic) || (p == Present_t::Slider) || (p == Present_t::Drag)) {
+            if (ImGui::ArrowButton("###_min_max", ((this->show_minmax) ? (ImGuiDir_Down) : (ImGuiDir_Up)))) {
+                this->show_minmax = !this->show_minmax;
+            }
+            this->tooltip.ToolTip("Min/Max Values");
+            ImGui::SameLine();
         }
-        this->tooltip.ToolTip("Min/Max Values");
-        ImGui::SameLine();
+        float vec_min = std::max(minval.x, std::max(minval.y, std::max(minval.z, minval.w)));
+        float vec_max = std::min(maxval.x, std::min(maxval.y, std::min(maxval.z, maxval.w)));
+
         // Value
-        ImGui::InputFloat4(label.c_str(), glm::value_ptr(std::get<glm::vec4>(this->widget_store)),
-            this->float_format.c_str(), ImGuiInputTextFlags_None);
+        if (p == Present_t::Slider) {
+            const float offset = 2.0f;
+            float value_min = std::min(value.x, std::min(value.y, std::min(value.z, value.w)));
+            float value_max = std::max(value.x, std::max(value.y, std::max(value.z, value.w)));
+            auto slider_min =
+                std::max(vec_min, ((value_min == 0.0f) ? (-offset) : (value_min - (offset * fabsf(value_min)))));
+            auto slider_max =
+                std::min(vec_max, ((value_max == 0.0f) ? (offset) : (value_max + (offset * fabsf(value_max)))));
+            ImGui::SliderFloat4(label.c_str(), glm::value_ptr(std::get<glm::vec4>(this->widget_store)), slider_min,
+                slider_max, this->float_format.c_str());
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else if (p == Present_t::Drag) {
+            // Relative step size
+            float min_step_size = 1.0f;
+            if ((vec_min > -FLT_MAX) && (vec_max < FLT_MAX)) {
+                min_step_size = (vec_max - vec_min) * 0.003f; // 0.3%
+            }
+            ImGui::DragFloat4(label.c_str(), glm::value_ptr(std::get<glm::vec4>(this->widget_store)), min_step_size,
+                vec_min, vec_max);
+            this->help = "[Ctrl + Click] to turn slider into an input box.";
+        } else { // Present_t::Basic
+            ImGui::InputFloat4(label.c_str(), glm::value_ptr(std::get<glm::vec4>(this->widget_store)),
+                this->float_format.c_str(), ImGuiInputTextFlags_None);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) {
             auto x = std::max(minval.x, std::min(std::get<glm::vec4>(this->widget_store).x, maxval.x));
             auto y = std::max(minval.y, std::min(std::get<glm::vec4>(this->widget_store).y, maxval.y));
@@ -1174,15 +1453,19 @@ bool megamol::gui::ParameterPresentation::widget_vector4f(megamol::gui::Paramete
         } else if (!ImGui::IsItemActive() && !ImGui::IsItemEdited()) {
             this->widget_store = value;
         }
-        if (this->show_minmax) {
-            GUIUtils::ReadOnlyWigetStyle(true);
-            auto min_value = minval;
-            ImGui::InputFloat4(
-                "Min Value", glm::value_ptr(min_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
-            auto max_value = maxval;
-            ImGui::InputFloat4(
-                "Max Value", glm::value_ptr(max_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
-            GUIUtils::ReadOnlyWigetStyle(false);
+
+        // Min Max Values
+        if ((p == Present_t::Basic) || (p == Present_t::Slider) || (p == Present_t::Drag)) {
+            if (this->show_minmax) {
+                GUIUtils::ReadOnlyWigetStyle(true);
+                auto min_value = minval;
+                ImGui::InputFloat4(
+                    "Min Value", glm::value_ptr(min_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
+                auto max_value = maxval;
+                ImGui::InputFloat4(
+                    "Max Value", glm::value_ptr(max_value), this->float_format.c_str(), ImGuiInputTextFlags_None);
+                GUIUtils::ReadOnlyWigetStyle(false);
+            }
         }
         ImGui::EndGroup();
     }
@@ -1230,13 +1513,9 @@ bool megamol::gui::ParameterPresentation::widget_transfer_function_editor(
     ImGuiStyle& style = ImGui::GetStyle();
 
     if (this->use_external_tf_editor) {
-        if (this->tf_editor_external_ptr == nullptr) {
-            megamol::core::utility::log::Log::DefaultLog.WriteError(
-                "[GUI] Pointer to external transfer function editor is nullptr. [%s, %s, line %d]\n", __FILE__,
-                __FUNCTION__, __LINE__);
-            return false;
+        if (this->tf_editor_external_ptr != nullptr) {
+            isActive = !(this->tf_editor_external_ptr->GetConnectedParameterName().empty());
         }
-        isActive = !(this->tf_editor_external_ptr->GetConnectedParameterName().empty());
     }
 
     // LOCAL -----------------------------------------------------------
@@ -1265,36 +1544,40 @@ bool megamol::gui::ParameterPresentation::widget_transfer_function_editor(
             ImGui::TextEx(label.c_str(), ImGui::FindRenderedTextEnd(label.c_str()));
         }
 
-        // Toggle internal and external editor, if available
-        if (this->tf_editor_external_ptr != nullptr) {
-            if (ImGui::RadioButton("External", this->use_external_tf_editor)) {
-                this->use_external_tf_editor = true;
-                /// If not this->tf_editor_external_ptr->SetConnectedParameter(&param, full_param_name); additional
-                /// click on edit is required.
-            }
-            ImGui::SameLine();
-            if (ImGui::RadioButton("Internal", !this->use_external_tf_editor)) {
-                this->use_external_tf_editor = false;
+        // Toggle inplace and external editor, if available
+        if (this->tf_editor_external_ptr == nullptr) {
+            GUIUtils::ReadOnlyWigetStyle(true);
+        }
+        if (ImGui::RadioButton("External Editor", this->use_external_tf_editor)) {
+            this->use_external_tf_editor = true;
+            this->show_tf_editor = false;
+        }
+        if (this->tf_editor_external_ptr == nullptr) {
+            GUIUtils::ReadOnlyWigetStyle(false);
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton("Inplace", !this->use_external_tf_editor)) {
+            this->use_external_tf_editor = false;
+            if (this->tf_editor_external_ptr != nullptr) {
                 this->tf_editor_external_ptr->SetConnectedParameter(nullptr, "");
             }
-            ImGui::SameLine();
         }
+        ImGui::SameLine();
 
         if (this->use_external_tf_editor) {
 
             // Editor
-            ImGui::PushID("Edit_");
-            ImGui::PushStyleColor(ImGuiCol_Button, style.Colors[isActive ? ImGuiCol_ButtonHovered : ImGuiCol_Button]);
-            ImGui::PushStyleColor(
-                ImGuiCol_ButtonHovered, style.Colors[isActive ? ImGuiCol_Button : ImGuiCol_ButtonHovered]);
-            ImGui::PushStyleColor(ImGuiCol_ButtonActive, style.Colors[ImGuiCol_ButtonActive]);
-            if (ImGui::Button("Edit")) {
+            if (isActive || (this->tf_editor_external_ptr == nullptr)) {
+                GUIUtils::ReadOnlyWigetStyle(true);
+            }
+            if (ImGui::Button("Connect")) {
                 retval = true;
             }
-            ImGui::PopStyleColor(3);
-            ImGui::PopID();
+            if (isActive || (this->tf_editor_external_ptr == nullptr)) {
+                GUIUtils::ReadOnlyWigetStyle(false);
+            }
 
-        } else { // Internal Editor
+        } else { // Inplace Editor
 
             // Editor
             if (ImGui::Checkbox("Editor ", &this->show_tf_editor)) {
@@ -1317,38 +1600,20 @@ bool megamol::gui::ParameterPresentation::widget_transfer_function_editor(
 
         // Copy
         if (ImGui::Button("Copy")) {
-#ifdef GUI_USE_GLFW
-            auto glfw_win = ::glfwGetCurrentContext();
-            ::glfwSetClipboardString(glfw_win, value.c_str());
-#elif _WIN32
             ImGui::SetClipboardText(value.c_str());
-#else // LINUX
-            megamol::core::utility::log::Log::DefaultLog.WriteWarn(
-                "[GUI] No clipboard use provided. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
-            megamol::core::utility::log::Log::DefaultLog.WriteInfo(
-                "[GUI] Transfer Function JSON String:\n%s", value.c_str());
-#endif
         }
         ImGui::SameLine();
 
         // Paste
         if (ImGui::Button("Paste")) {
-#ifdef GUI_USE_GLFW
-            auto glfw_win = ::glfwGetCurrentContext();
-            inout_parameter.SetValue(std::string(::glfwGetClipboardString(glfw_win)));
-#elif _WIN32
             inout_parameter.SetValue(std::string(ImGui::GetClipboardText()));
-#else // LINUX
-            megamol::core::utility::log::Log::DefaultLog.WriteWarn(
-                "[GUI] No clipboard use provided. [%s, %s, line %d]\n", __FILE__, __FUNCTION__, __LINE__);
-#endif
             value = std::get<std::string>(inout_parameter.GetValue());
             if (this->use_external_tf_editor) {
                 if (this->tf_editor_external_ptr != nullptr) {
                     this->tf_editor_external_ptr->SetTransferFunction(value, true);
                 }
             } else {
-                this->tf_editor_internal.SetTransferFunction(value, false);
+                this->tf_editor_inplace.SetTransferFunction(value, false);
             }
         }
 
@@ -1359,13 +1624,13 @@ bool megamol::gui::ParameterPresentation::widget_transfer_function_editor(
             }
             // Propagate the transfer function to the editor.
             if (updateEditor) {
-                this->tf_editor_internal.SetTransferFunction(value, false);
+                this->tf_editor_inplace.SetTransferFunction(value, false);
             }
             // Draw transfer function editor
             if (this->show_tf_editor) {
-                if (this->tf_editor_internal.Widget(false)) {
+                if (this->tf_editor_inplace.Widget(false)) {
                     std::string value;
-                    if (this->tf_editor_internal.GetTransferFunction(value)) {
+                    if (this->tf_editor_inplace.GetTransferFunction(value)) {
                         inout_parameter.SetValue(value);
                         retval = false; /// (Returning true opens external editor)
                     }
@@ -1411,8 +1676,7 @@ bool megamol::gui::ParameterPresentation::widget_knob(
     if (scope == ParameterPresentation::WidgetScope::LOCAL) {
 
         // Draw knob
-        const float knob_size =
-            (1.0f * ImGui::GetTextLineHeightWithSpacing()) + (1.0f * ImGui::GetFrameHeightWithSpacing());
+        const float knob_size = ImGui::GetTextLineHeightWithSpacing() + ImGui::GetFrameHeightWithSpacing();
         if (ParameterPresentation::KnobButton("param_knob", knob_size, value, minval, maxval)) {
             retval = true;
         }

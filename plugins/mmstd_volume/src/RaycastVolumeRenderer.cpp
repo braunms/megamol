@@ -13,7 +13,6 @@
 #include "mmcore/param/ColorParam.h"
 #include "mmcore/param/EnumParam.h"
 #include "mmcore/param/FloatParam.h"
-#include "mmcore/view/AbstractRenderingView.h"
 #include "mmcore/view/CallGetTransferFunction.h"
 
 #include "vislib/graphics/gl/ShaderSource.h"
@@ -30,10 +29,12 @@
 #include <memory>
 #include <vector>
 
+#include "mmcore/view/light/DistantLight.h"
+
 using namespace megamol::stdplugin::volume;
 
 RaycastVolumeRenderer::RaycastVolumeRenderer()
-    : Renderer3DModule_2()
+    : Renderer3DModuleGL()
     , m_mode("mode", "Mode changing the behavior for the raycaster")
     , m_ray_step_ratio_param("ray step ratio", "Adjust sampling rate")
     , m_use_lighting_slot("lighting::use lighting", "Enable simple volumetric illumination")
@@ -43,7 +44,6 @@ RaycastVolumeRenderer::RaycastVolumeRenderer()
     , m_shininess_slot("lighting::shininess", "Shininess for Phong lighting")
     , m_ambient_color("lighting::ambient color", "Ambient color")
     , m_specular_color("lighting::specular color", "Specular color")
-    , m_light_color("lighting::light color", "Light color")
     , m_material_color("lighting::material color", "Material color")
     , m_opacity_threshold("opacity threshold", "Opacity threshold for integrative rendering")
     , m_iso_value("isovalue", "Isovalue for isosurface rendering")
@@ -53,13 +53,17 @@ RaycastVolumeRenderer::RaycastVolumeRenderer()
     , paramMaxOverride("override::max", "Override the maximum value provided by the data set")
     , m_renderer_callerSlot("Renderer", "Renderer for chaining")
     , m_volumetricData_callerSlot("getData", "Connects the volume renderer with a voluemtric data source")
+    , m_lights_callerSlot("lights", "Lights are retrieved over this slot.")
     , m_transferFunction_callerSlot("getTranfserFunction", "Connects the volume renderer with a transfer function") {
 
-    this->m_renderer_callerSlot.SetCompatibleCall<megamol::core::view::CallRender3D_2Description>();
+    this->m_renderer_callerSlot.SetCompatibleCall<megamol::core::view::CallRender3DGLDescription>();
     this->MakeSlotAvailable(&this->m_renderer_callerSlot);
 
     this->m_volumetricData_callerSlot.SetCompatibleCall<megamol::core::misc::VolumetricDataCallDescription>();
     this->MakeSlotAvailable(&this->m_volumetricData_callerSlot);
+
+    this->m_lights_callerSlot.SetCompatibleCall<megamol::core::view::light::CallLightDescription>();
+    this->MakeSlotAvailable(&this->m_lights_callerSlot);
 
     this->m_transferFunction_callerSlot.SetCompatibleCall<megamol::core::view::CallGetTransferFunctionDescription>();
     this->MakeSlotAvailable(&this->m_transferFunction_callerSlot);
@@ -102,9 +106,6 @@ RaycastVolumeRenderer::RaycastVolumeRenderer()
 
     this->m_specular_color << new core::param::ColorParam(1.0f, 1.0f, 1.0f, 1.0f);
     this->MakeSlotAvailable(&this->m_specular_color);
-
-    this->m_light_color << new core::param::ColorParam(1.0f, 1.0f, 1.0f, 1.0f);
-    this->MakeSlotAvailable(&this->m_light_color);
 
     this->m_material_color << new core::param::ColorParam(0.95f, 0.67f, 0.47f, 1.0f);
     this->MakeSlotAvailable(&this->m_material_color);
@@ -187,9 +188,9 @@ bool RaycastVolumeRenderer::create() {
 
 void RaycastVolumeRenderer::release() {}
 
-bool RaycastVolumeRenderer::GetExtents(megamol::core::view::CallRender3D_2& cr) {
+bool RaycastVolumeRenderer::GetExtents(megamol::core::view::CallRender3DGL& cr) {
     auto cd = m_volumetricData_callerSlot.CallAs<megamol::core::misc::VolumetricDataCall>();
-    auto ci = m_renderer_callerSlot.CallAs<megamol::core::view::CallRender3D_2>();
+    auto ci = m_renderer_callerSlot.CallAs<megamol::core::view::CallRender3DGL>();
 
     if (cd == nullptr) return false;
 
@@ -210,7 +211,7 @@ bool RaycastVolumeRenderer::GetExtents(megamol::core::view::CallRender3D_2& cr) 
     if (ci != nullptr) {
         *ci = cr;
 
-        if (!(*ci)(core::view::CallRender3D_2::FnGetExtents)) return false;
+        if (!(*ci)(core::view::CallRender3DGL::FnGetExtents)) return false;
 
         bbox.Union(ci->AccessBoundingBoxes().BoundingBox());
         cbox.Union(ci->AccessBoundingBoxes().ClipBox());
@@ -222,18 +223,25 @@ bool RaycastVolumeRenderer::GetExtents(megamol::core::view::CallRender3D_2& cr) 
     return true;
 }
 
-bool RaycastVolumeRenderer::Render(megamol::core::view::CallRender3D_2& cr) {
+bool RaycastVolumeRenderer::Render(megamol::core::view::CallRender3DGL& cr) {
     // Chain renderer
-    auto ci = m_renderer_callerSlot.CallAs<megamol::core::view::CallRender3D_2>();
+    auto ci = m_renderer_callerSlot.CallAs<megamol::core::view::CallRender3DGL>();
+
+    // Camera
+    core::view::Camera_2 cam;
+    cr.GetCamera(cam);
+    cam_type::snapshot_type snapshot;
+    cam_type::matrix_type viewTemp, projTemp;
+    cam.calc_matrices(snapshot, viewTemp, projTemp, core::thecam::snapshot_content::all);
 
     if (ci != nullptr) {
         auto cam = cr.GetCamera();
-        ci->SetCameraState(cam);
+        ci->SetCamera(cam);
 
         if (this->m_mode.Param<core::param::EnumParam>()->Value() == 0 ||
             this->m_mode.Param<core::param::EnumParam>()->Value() == 2) {
             if (this->fbo.IsValid()) this->fbo.Release();
-            this->fbo.Create(ci->GetViewport().Width(), ci->GetViewport().Height(), GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE,
+            this->fbo.Create(cam.resolution_gate().width(), cam.resolution_gate().height(), GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE,
                 vislib::graphics::gl::FramebufferObject::ATTACHMENT_TEXTURE);
             this->fbo.Enable();
         }
@@ -241,7 +249,7 @@ bool RaycastVolumeRenderer::Render(megamol::core::view::CallRender3D_2& cr) {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         ci->SetTime(cr.Time());
-        if (!(*ci)(core::view::CallRender3D_2::FnRender)) return false;
+        if (!(*ci)(core::view::CallRender3DGL::FnRender)) return false;
 
         if (this->m_mode.Param<core::param::EnumParam>()->Value() == 0 ||
             this->m_mode.Param<core::param::EnumParam>()->Value() == 2) {
@@ -250,10 +258,10 @@ bool RaycastVolumeRenderer::Render(megamol::core::view::CallRender3D_2& cr) {
     }
 
     // create render target texture
-    if (this->m_render_target == nullptr || this->m_render_target->getWidth() != cr.GetViewport().Width() ||
-        this->m_render_target->getHeight() != cr.GetViewport().Height()) {
+    if (this->m_render_target == nullptr || this->m_render_target->getWidth() != cam.resolution_gate().width() ||
+        this->m_render_target->getHeight() != cam.resolution_gate().height()) {
 
-        glowl::TextureLayout render_tgt_layout(GL_RGBA8, cr.GetViewport().Width(), cr.GetViewport().Height(), 1,
+        glowl::TextureLayout render_tgt_layout(GL_RGBA8, cam.resolution_gate().width(), cam.resolution_gate().height(), 1,
             GL_RGBA, GL_UNSIGNED_BYTE, 1,
             {{GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER}, {GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER},
                 {GL_TEXTURE_WRAP_R, GL_CLAMP_TO_BORDER}, {GL_TEXTURE_MIN_FILTER, GL_LINEAR},
@@ -263,7 +271,7 @@ bool RaycastVolumeRenderer::Render(megamol::core::view::CallRender3D_2& cr) {
             std::make_unique<glowl::Texture2D>("raycast_volume_render_target", render_tgt_layout, nullptr);
 
         // create normal target texture
-        glowl::TextureLayout normal_tgt_layout(GL_RGBA32F, cr.GetViewport().Width(), cr.GetViewport().Height(), 1,
+        glowl::TextureLayout normal_tgt_layout(GL_RGBA32F, cam.resolution_gate().width(), cam.resolution_gate().height(), 1,
             GL_RGBA, GL_FLOAT, 1,
             {{GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER}, {GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER},
                 {GL_TEXTURE_WRAP_R, GL_CLAMP_TO_BORDER}, {GL_TEXTURE_MIN_FILTER, GL_LINEAR},
@@ -273,7 +281,7 @@ bool RaycastVolumeRenderer::Render(megamol::core::view::CallRender3D_2& cr) {
             std::make_unique<glowl::Texture2D>("raycast_volume_normal_target", normal_tgt_layout, nullptr);
 
         // create depth target texture
-        glowl::TextureLayout depth_tgt_layout(GL_R32F, cr.GetViewport().Width(), cr.GetViewport().Height(), 1, GL_R,
+        glowl::TextureLayout depth_tgt_layout(GL_R32F, cam.resolution_gate().width(), cam.resolution_gate().height(), 1, GL_R,
             GL_FLOAT, 1,
             {{GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER}, {GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER},
                 {GL_TEXTURE_WRAP_R, GL_CLAMP_TO_BORDER}, {GL_TEXTURE_MIN_FILTER, GL_LINEAR},
@@ -283,18 +291,11 @@ bool RaycastVolumeRenderer::Render(megamol::core::view::CallRender3D_2& cr) {
     }
 
     // this is the apex of suck and must die
-    std::array<float, 4> light = {0.0f, 0.0f, 1.0f, 1.0f};
-    glGetLightfv(GL_LIGHT0, GL_POSITION, light.data());
+    //std::array<float, 4> light = {0.0f, 0.0f, 1.0f, 1.0f};
+    //glGetLightfv(GL_LIGHT0, GL_POSITION, light.data());
     // end suck
 
     if (!updateVolumeData(cr.Time())) return false;
-
-    // get camera
-    core::view::Camera_2 cam;
-    cr.GetCamera(cam);
-
-    cam_type::matrix_type view, proj;
-    cam.calc_matrices(view, proj);
 
     // enable raycast volume rendering program
     vislib::graphics::gl::GLSLComputeShader* compute_shdr;
@@ -314,13 +315,46 @@ bool RaycastVolumeRenderer::Render(megamol::core::view::CallRender3D_2& cr) {
         return false;
     }
 
+    // Lights
+    auto curlight = core::view::light::DistantLightType{{{1.0f, 1.0f, 1.0f}, 1.0f}, {1.0f, 0.0f, 0.0f}, 0.0f, true};
+    auto call_light = m_lights_callerSlot.CallAs<core::view::light::CallLight>();
+    if (call_light != nullptr) {
+        if (!(*call_light)(0)) {
+            return false;
+        }
+
+        auto lights = call_light->getData();
+        auto distant_lights = lights.get<core::view::light::DistantLightType>();
+
+        if (!distant_lights.empty()) {
+            for (auto& l : distant_lights) {
+                const auto use_eyedir = l.eye_direction;
+                if (use_eyedir) {
+                    auto view_vec = cam.view_vector();
+                    l.direction[0] = view_vec[0];
+                    l.direction[1] = view_vec[1];
+                    l.direction[2] = view_vec[2];
+                }
+            }
+            curlight = distant_lights[0];
+        }
+
+        if (distant_lights.size() > 1) {
+            megamol::core::utility::log::Log::DefaultLog.WriteWarn(
+                "[RaycastVolumeRenderer] Only one single 'Distant Light' source is supported by this renderer");
+        } else if (distant_lights.empty()) {
+            megamol::core::utility::log::Log::DefaultLog.WriteWarn("[RaycastVolumeRenderer] No 'Distant Light' found");
+        }
+
+    }
+
     // setup
     compute_shdr->Enable();
 
     glUniformMatrix4fv(compute_shdr->ParameterLocation("view_mx"), 1, GL_FALSE,
-        glm::value_ptr(static_cast<glm::mat4>(view)));
+        glm::value_ptr(static_cast<glm::mat4>(viewTemp)));
     glUniformMatrix4fv(compute_shdr->ParameterLocation("proj_mx"), 1, GL_FALSE,
-        glm::value_ptr(static_cast<glm::mat4>(proj)));
+        glm::value_ptr(static_cast<glm::mat4>(projTemp)));
 
     glm::vec2 rt_resolution;
     rt_resolution[0] = static_cast<float>(m_render_target->getWidth());
@@ -365,17 +399,17 @@ bool RaycastVolumeRenderer::Render(megamol::core::view::CallRender3D_2& cr) {
     glUniform1f(compute_shdr->ParameterLocation("ks"), this->m_ks_slot.Param<core::param::FloatParam>()->Value());
     glUniform1f(
         compute_shdr->ParameterLocation("shininess"), this->m_shininess_slot.Param<core::param::FloatParam>()->Value());
-    glUniform3fv(compute_shdr->ParameterLocation("light"), 1, light.data());
+    glUniform3fv(compute_shdr->ParameterLocation("light"), 1, curlight.direction.data());
     glUniform3fv(compute_shdr->ParameterLocation("ambient_col"), 1,
         this->m_ambient_color.Param<core::param::ColorParam>()->Value().data());
     glUniform3fv(compute_shdr->ParameterLocation("specular_col"), 1,
         this->m_specular_color.Param<core::param::ColorParam>()->Value().data());
     glUniform3fv(compute_shdr->ParameterLocation("light_col"), 1,
-        this->m_light_color.Param<core::param::ColorParam>()->Value().data());
+        curlight.colour.data());
     glUniform3fv(compute_shdr->ParameterLocation("material_col"), 1,
         this->m_material_color.Param<core::param::ColorParam>()->Value().data());
 
-    auto const arv = std::dynamic_pointer_cast<core::view::AbstractRenderingView const>(cr.PeekCallerSlot()->Parent());
+    auto const arv = std::dynamic_pointer_cast<core::view::AbstractView const>(cr.PeekCallerSlot()->Parent());
     std::array<float, 4> bkgndCol = {1.0f, 1.0f, 1.0f, 1.0f};
     if (arv != nullptr) {
         auto const ptr = arv->BkgndColour();

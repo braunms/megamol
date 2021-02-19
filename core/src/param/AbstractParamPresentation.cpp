@@ -29,6 +29,7 @@ const std::string AbstractParamPresentation::GetTypeName(ParamType type) {
     case(ParamType::VECTOR3F): return "Vector3fParam";
     case(ParamType::VECTOR4F): return "Vector4fParam";
     case(ParamType::GROUP_ANIMATION): return "AnimationGroup";
+    case (ParamType::GROUP_3D_CUBE): return "3DCubeGroup";
     default: return "UNKNOWN";
     }
 }
@@ -49,10 +50,13 @@ AbstractParamPresentation::AbstractParamPresentation(void)
     this->presentation_name_map.emplace(Presentation::FilePath, "File Path");
     this->presentation_name_map.emplace(Presentation::TransferFunction, "Transfer Function");
     this->presentation_name_map.emplace(Presentation::Knob, "Knob");
-    this->presentation_name_map.emplace(Presentation::PinValueToMouse, "Pin Value To Mouse");
-    this->presentation_name_map.emplace(Presentation::Rotation3D_Direction, "3D Rotation - Direction");
-    this->presentation_name_map.emplace(Presentation::Rotation3D_Axes, "3D Rotation - Axes");
+    this->presentation_name_map.emplace(Presentation::Slider, "Slider");
+    this->presentation_name_map.emplace(Presentation::Drag, "Drag");
+    this->presentation_name_map.emplace(Presentation::Direction, "Direction");
+    this->presentation_name_map.emplace(Presentation::Rotation, "Rotation");
+    this->presentation_name_map.emplace(Presentation::PinMouse, "Pin to Mouse");
     this->presentation_name_map.emplace(Presentation::Group_Animation, "Animation");
+    this->presentation_name_map.emplace(Presentation::Group_3D_Cube, "3D Cube");
 }
 
 
@@ -90,11 +94,13 @@ bool AbstractParamPresentation::InitPresentation(AbstractParamPresentation::Para
             this->SetGUIPresentation(Presentation::Basic);
         } break;
         case (ParamType::FLOAT): {
-            this->compatible = Presentation::Basic | Presentation::String | Presentation::Knob | Presentation::PinValueToMouse;
+            this->compatible = Presentation::Basic | Presentation::String | Presentation::Knob |
+                Presentation::Slider | Presentation::Drag;
             this->SetGUIPresentation(Presentation::Basic);
         } break;
         case (ParamType::INT): {
-            this->compatible = Presentation::Basic | Presentation::String | Presentation::PinValueToMouse;
+            this->compatible = Presentation::Basic | Presentation::String |
+                Presentation::Slider | Presentation::Drag;
             this->SetGUIPresentation(Presentation::Basic);
         } break;
         case (ParamType::STRING): {
@@ -110,19 +116,26 @@ bool AbstractParamPresentation::InitPresentation(AbstractParamPresentation::Para
             this->SetGUIPresentation(Presentation::TransferFunction);
         } break;
         case (ParamType::VECTOR2F): {
-            this->compatible = Presentation::Basic | Presentation::String | Presentation::PinValueToMouse;
+            this->compatible = Presentation::Basic | Presentation::String | 
+                Presentation::Slider | Presentation::Drag;
             this->SetGUIPresentation(Presentation::Basic);
         } break;
         case (ParamType::VECTOR3F): {
-            this->compatible = Presentation::Basic | Presentation::String | Presentation::PinValueToMouse | Presentation::Rotation3D_Direction;
+            this->compatible = Presentation::Basic | Presentation::String | 
+                Presentation::Direction | Presentation::Slider | Presentation::Drag;
             this->SetGUIPresentation(Presentation::Basic);
         } break;
         case (ParamType::VECTOR4F): {
-            this->compatible = Presentation::Basic | Presentation::String | Presentation::PinValueToMouse | Presentation::Color | Presentation::Rotation3D_Axes;
+            this->compatible = Presentation::Basic | Presentation::String | 
+                Presentation::Color | Presentation::Rotation | Presentation::Slider | Presentation::Drag;
             this->SetGUIPresentation(Presentation::Basic);
         } break;
         case (ParamType::GROUP_ANIMATION): {
             this->compatible = Presentation::Basic | Presentation::Group_Animation;
+            this->SetGUIPresentation(Presentation::Basic);
+        } break;
+        case (ParamType::GROUP_3D_CUBE): {
+            this->compatible = Presentation::Basic | Presentation::Group_3D_Cube;
             this->SetGUIPresentation(Presentation::Basic);
         } break;
         default:
