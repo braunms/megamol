@@ -1,7 +1,7 @@
 /*
  * View2DGL.cpp
  *
- * Copyright (C) 2009 - 2010 by VISUS (Universitaet Stuttgart). 
+ * Copyright (C) 2009 - 2010 by VISUS (Universitaet Stuttgart).
  * Alle Rechte vorbehalten.
  */
 
@@ -63,7 +63,7 @@ view::View2DGL::View2DGL(void)
     this->_lhsRenderSlot.SetCallback(view::CallRenderViewGL::ClassName(),
         view::CallRenderViewGL::FunctionName(view::CallRenderViewGL::CALL_UNFREEZE), &AbstractView::OnUnfreezeView);
     this->_lhsRenderSlot.SetCallback(view::CallRenderViewGL::ClassName(),
-        view::CallRenderViewGL::FunctionName(view::CallRenderViewGL::CALL_RESETVIEW), &AbstractView::onResetView);
+        view::CallRenderViewGL::FunctionName(view::CallRenderViewGL::CALL_RESETVIEW), &AbstractView::OnResetView);
     this->MakeSlotAvailable(&this->_lhsRenderSlot);
 
     this->_rhsRenderSlot.SetCompatibleCall<CallRender2DGLDescription>();
@@ -152,17 +152,40 @@ void view::View2DGL::Render(const mmcRenderViewContext& context, Call* call) {
                 return;
             }
         }
-        
-        cr2d->SetFramebufferObject(_fbo);
-        // TODO here we have to apply the new camera
     } else {
         auto gl_call = dynamic_cast<view::CallRenderViewGL*>(call);
-        cr2d->SetFramebufferObject(gl_call->GetFramebufferObject());
+        this->_fbo = gl_call->GetFramebufferObject();
     }
 
-    // set camera to call
+    this->_fbo->Enable();
+    auto bgcol = this->BkgndColour();
+    glClearColor(bgcol.r, bgcol.g, bgcol.b, bgcol.a);
+    glClearDepth(1.0f);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    cr2d->SetFramebufferObject(_fbo);
 
     (*cr2d)(AbstractCallRender::FnRender);
+
+    this->_fbo->Disable();
+    if (call == nullptr) {
+        // TODO This does not work (i.e. disable the drawAxes checkbox in PCP Renderer):
+        //this->_fbo->DrawColourTexture();
+
+        // TODO Best fix for now steal blitting from splitview:
+        // Bind and blit framebuffer.
+        GLint binding, readBuffer;
+        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &binding);
+        glGetIntegerv(GL_READ_BUFFER, &readBuffer);
+
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, _fbo->GetID());
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glBlitFramebuffer(0, 0, _fbo->GetWidth(), _fbo->GetHeight(), 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, binding);
+        glReadBuffer(readBuffer);
+
+        // TODO VISLIB MUST DIE AND BURN IN HELL!!!
+    }
 
     //after render
     AbstractView::afterRender(context);
@@ -248,7 +271,7 @@ bool view::View2DGL::OnKey(Key key, KeyAction action, Modifiers mods) {
     if (cr == NULL) return false;
 
     if (key == Key::KEY_HOME) {
-        onResetView(this->_resetViewSlot);
+        OnResetView(this->_resetViewSlot);
     }
 
     InputEvent evt;
@@ -385,7 +408,7 @@ void view::View2DGL::unpackMouseCoordinates(float &x, float &y) {
  * view::View2DGL::create
  */
 bool view::View2DGL::create(void) {
- 
+
     this->_firstImg = true;
 
     this->_fbo = std::make_shared<vislib::graphics::gl::FramebufferObject>();
