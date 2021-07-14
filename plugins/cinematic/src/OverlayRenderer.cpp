@@ -11,12 +11,12 @@
 
 using namespace megamol;
 using namespace megamol::core;
-using namespace megamol::gui;
+using namespace megamol::cinematic;
 
 
-OverlayRenderer::OverlayRenderer(void)
+OverlayRenderer::OverlayRenderer()
         : view::RendererModule<view::CallRender3DGL>()
-        , megamol::core::view::RenderUtils()
+        , megamol::core::utility::RenderUtils()
         , paramMode("mode", "Overlay mode.")
         , paramAnchor("anchor", "Anchor of overlay.")
         , paramCustomPosition("position_offset", "Custom relative position offset in respect to selected anchor.")
@@ -150,12 +150,12 @@ OverlayRenderer::OverlayRenderer(void)
 }
 
 
-OverlayRenderer::~OverlayRenderer(void) {
+OverlayRenderer::~OverlayRenderer() {
     this->Release();
 }
 
 
-void OverlayRenderer::release(void) {
+void OverlayRenderer::release() {
 
     this->m_font_ptr.reset();
     this->m_parameter_ptr = nullptr;
@@ -164,7 +164,7 @@ void OverlayRenderer::release(void) {
 }
 
 
-bool OverlayRenderer::create(void) {
+bool OverlayRenderer::create() {
 
     if (!this->InitPrimitiveRendering(this->GetCoreInstance()->ShaderSourceFactory())) {
         megamol::core::utility::log::Log::DefaultLog.WriteError(
@@ -376,7 +376,7 @@ bool OverlayRenderer::onTriggerRecalcRectangle(core::param::ParamSlot& slot) {
 }
 
 
-void OverlayRenderer::setParameterGUIVisibility(void) {
+void OverlayRenderer::setParameterGUIVisibility() {
 
     Mode mode = static_cast<Mode>(this->paramMode.Param<param::EnumParam>()->Value());
     bool texture_mode = (mode == Mode::TEXTURE);
@@ -425,6 +425,9 @@ bool OverlayRenderer::GetExtents(view::CallRender3DGL& call) {
 
 
 bool OverlayRenderer::Render(view::CallRender3DGL& call) {
+
+    auto const lhsFBO = call.GetFramebufferObject();
+    lhsFBO->Enable();
 
     // Camera
     view::Camera_2 cam;
@@ -585,6 +588,8 @@ bool OverlayRenderer::Render(view::CallRender3DGL& call) {
     } break;
     }
 
+    lhsFBO->Disable();
+
     return true;
 }
 
@@ -592,10 +597,10 @@ bool OverlayRenderer::Render(view::CallRender3DGL& call) {
 void OverlayRenderer::drawScreenSpaceBillboard(
     glm::mat4 ortho, glm::vec2 viewport, Rectangle rectangle, GLuint texture_id, glm::vec4 overwrite_color) {
 
-    glm::vec3 pos_bottom_left = {rectangle.left, rectangle.bottom, 0.0f};
-    glm::vec3 pos_upper_left = {rectangle.left, rectangle.top, 0.0f};
-    glm::vec3 pos_upper_right = {rectangle.right, rectangle.top, 0.0f};
-    glm::vec3 pos_bottom_right = {rectangle.right, rectangle.bottom, 0.0f};
+    glm::vec3 pos_bottom_left = {rectangle.left, rectangle.bottom, 1.0f};
+    glm::vec3 pos_upper_left = {rectangle.left, rectangle.top, 1.0f};
+    glm::vec3 pos_upper_right = {rectangle.right, rectangle.top, 1.0f};
+    glm::vec3 pos_bottom_right = {rectangle.right, rectangle.bottom, 1.0f};
     this->Push2DColorTexture(
         texture_id, pos_bottom_left, pos_upper_left, pos_upper_right, pos_bottom_right, true, overwrite_color);
     this->DrawTextures(ortho, viewport);

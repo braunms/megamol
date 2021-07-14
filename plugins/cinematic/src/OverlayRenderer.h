@@ -5,8 +5,8 @@
  * Alle Rechte vorbehalten.
  */
 
-#ifndef MEGAMOL_GUI_OVERLAYRENDERER_H_INCLUDED
-#define MEGAMOL_GUI_OVERLAYRENDERER_H_INCLUDED
+#ifndef MEGAMOL_CINEMATIC_OVERLAYRENDERER_H_INCLUDED
+#define MEGAMOL_CINEMATIC_OVERLAYRENDERER_H_INCLUDED
 #pragma once
 
 
@@ -24,12 +24,12 @@
 #include "mmcore/param/Vector2fParam.h"
 #include "mmcore/param/Vector3fParam.h"
 #include "mmcore/param/Vector4fParam.h"
+#include "mmcore/utility/RenderUtils.h"
 #include "mmcore/utility/ResourceWrapper.h"
 #include "mmcore/utility/SDFFont.h"
 #include "mmcore/utility/log/Log.h"
 #include "mmcore/view/AbstractView.h"
 #include "mmcore/view/CallRender3DGL.h"
-#include "mmcore/view/RenderUtils.h"
 #include "mmcore/view/RendererModule.h"
 
 #include <chrono>
@@ -38,13 +38,14 @@
 
 
 namespace megamol {
-namespace gui {
+namespace cinematic {
 
-    /**
-     * Renders various kinds of overlays.
+
+    /** ************************************************************************
+     * Renders various kinds of overlays
      */
     class OverlayRenderer : public megamol::core::view::RendererModule<megamol::core::view::CallRender3DGL>,
-                            megamol::core::view::RenderUtils {
+                            megamol::core::utility::RenderUtils {
     public:
         virtual std::vector<std::string> requested_lifetime_resources() {
             return {"IOpenGL_Context", "MegaMolGraph"};
@@ -55,7 +56,7 @@ namespace gui {
          *
          * @return The name of this module.
          */
-        static const char* ClassName(void) {
+        static const char* ClassName() {
             return "OverlayRenderer";
         }
 
@@ -64,7 +65,7 @@ namespace gui {
          *
          * @return A human readable description of this module.
          */
-        static const char* Description(void) {
+        static const char* Description() {
             return "Renders various kinds of overlays.";
         }
 
@@ -73,15 +74,15 @@ namespace gui {
          *
          * @return 'true' if the module is available, 'false' otherwise.
          */
-        static bool IsAvailable(void) {
+        static bool IsAvailable() {
             return true;
         }
 
         /** Ctor. */
-        OverlayRenderer(void);
+        OverlayRenderer();
 
         /** Dtor. */
-        virtual ~OverlayRenderer(void);
+        virtual ~OverlayRenderer();
 
     protected:
         /**
@@ -89,12 +90,12 @@ namespace gui {
          *
          * @return 'true' on success, 'false' otherwise.
          */
-        virtual bool create(void);
+        virtual bool create();
 
         /**
          * Implementation of 'Release'.
          */
-        virtual void release(void);
+        virtual void release();
 
         /**
          * The get extents callback. The module should set the members of
@@ -195,7 +196,7 @@ namespace gui {
          * functions
          **********************************************************************/
 
-        void setParameterGUIVisibility(void);
+        void setParameterGUIVisibility();
 
         void drawScreenSpaceBillboard(
             glm::mat4 ortho, glm::vec2 viewport, Rectangle rectangle, GLuint texture_id, glm::vec4 overwrite_color);
@@ -215,7 +216,8 @@ namespace gui {
         bool onTriggerRecalcRectangle(core::param::ParamSlot& slot);
     };
 
-} /* end namespace gui */
+
+} /* end namespace cinematic */
 } /* end namespace megamol */
 
-#endif /* MEGAMOL_GUI_OVERLAYRENDERER_H_INCLUDED */
+#endif /* MEGAMOL_CINEMATIC_OVERLAYRENDERER_H_INCLUDED */
